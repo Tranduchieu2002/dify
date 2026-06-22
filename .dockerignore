@@ -13,3 +13,5 @@
 *.md
 !web/README.md
 !api/README.md
+docker/volumes
+docker/volumes/**

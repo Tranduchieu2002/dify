@@ -8,7 +8,7 @@ from opentelemetry.instrumentation.celery import CeleryInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from opentelemetry.metrics import get_meter, get_meter_provider
+from opentelemetry.metrics import Observation, get_meter, get_meter_provider
 from opentelemetry.semconv.attributes.http_attributes import (  # type: ignore[import-untyped]
     HTTP_REQUEST_METHOD,
     HTTP_ROUTE,
@@ -143,6 +143,181 @@ def init_sqlalchemy_instrumentor(app: DifyApp) -> None:
         engines = list(app.extensions["sqlalchemy"].engines.values())
         _new_sqlalchemy_instrumentor().instrument(enable_commenter=True, engines=engines)
 
+        meter = get_meter("db_pool_metrics", version=dify_config.project.version)
+
+        def _checked_out(opts: object) -> list:
+            with contextlib.suppress(Exception):
+                with app.app_context():
+                    from extensions.ext_database import db
+
+                    return [Observation(db.engine.pool.checkedout())]
+            return [Observation(0)]
+
+        def _checked_in(opts: object) -> list:
+            with contextlib.suppress(Exception):
+                with app.app_context():
+                    from extensions.ext_database import db
+
+                    return [Observation(db.engine.pool.checkedin())]
+            return [Observation(0)]
+
+        def _overflow(opts: object) -> list:
+            with contextlib.suppress(Exception):
+                with app.app_context():
+                    from extensions.ext_database import db
+
+                    return [Observation(db.engine.pool.overflow())]
+            return [Observation(0)]
+
+        meter.create_observable_gauge(
+            "db.pool.checked_out",
+            callbacks=[_checked_out],
+            description="Number of connections currently checked out from the pool",
+            unit="{connection}",
+        )
+        meter.create_observable_gauge(
+            "db.pool.checked_in",
+            callbacks=[_checked_in],
+            description="Number of idle connections in the pool",
+            unit="{connection}",
+        )
+        meter.create_observable_gauge(
+            "db.pool.overflow",
+            callbacks=[_overflow],
+            description="Number of overflow connections currently open beyond pool_size",
+            unit="{connection}",
+        )
+
+
+_MONITORED_QUEUES = [
+    "workflow_professional",
+    "workflow_team",
+    "workflow_sandbox",
+    "schedule_executor",
+    "schedule_poller",
+    "dataset",
+    "priority_dataset",
+    "pipeline",
+    "monitor",
+    "mail",
+    "conversation",
+    "plugin",
+    "app_deletion",
+    "workflow_draft_var",
+    "workflow_storage",
+]
+
+
+def init_celery_queue_metrics(app: DifyApp) -> None:
+    from kombu.utils.url import parse_url  # type: ignore[import-untyped]
+    from redis import Redis
+
+    redis_config = parse_url(dify_config.CELERY_BROKER_URL)
+    celery_redis = Redis(
+        host=str(redis_config.get("hostname") or "localhost"),
+        port=int(redis_config.get("port") or 6379),
+        password=str(pwd) if (pwd := redis_config.get("password")) is not None else None,
+        db=int(redis_config.get("virtual_host")) if redis_config.get("virtual_host") else 1,
+        ssl=dify_config.BROKER_USE_SSL,
+        socket_timeout=5,
+        socket_connect_timeout=5,
+        health_check_interval=30,
+    )
+
+    meter = get_meter("celery_queue_metrics", version=dify_config.project.version)
+
+    def _queue_depth(opts: object) -> list:
+        results = []
+        with contextlib.suppress(Exception):
+            prefix = dify_config.REDIS_KEY_PREFIX
+            key_prefix = f"{prefix}:" if prefix else ""
+            for q in _MONITORED_QUEUES:
+                with contextlib.suppress(Exception):
+                    depth = celery_redis.llen(f"{key_prefix}{q}") or 0
+                    results.append(Observation(int(depth), {"queue": q}))
+        return results
+
+    def _task_status_count(opts: object) -> list:
+        results = []
+        with contextlib.suppress(Exception):
+            with app.app_context():
+                from sqlalchemy import text
+
+                from extensions.ext_database import db
+
+                rows = db.session.execute(
+                    text(
+                        "SELECT queue_name, status, COUNT(*) AS cnt"
+                        " FROM workflow_trigger_logs"
+                        " WHERE created_at >= NOW() - INTERVAL '1 hour'"
+                        " GROUP BY queue_name, status"
+                    )
+                ).fetchall()
+                for row in rows:
+                    results.append(Observation(int(row.cnt), {"queue": row.queue_name, "status": row.status}))
+        return results
+
+    def _running_elapsed_seconds(opts: object) -> list:
+        results = []
+        with contextlib.suppress(Exception):
+            with app.app_context():
+                from sqlalchemy import text
+
+                from extensions.ext_database import db
+
+                rows = db.session.execute(
+                    text(
+                        "SELECT queue_name,"
+                        " EXTRACT(EPOCH FROM (NOW() - triggered_at))::int AS elapsed_sec"
+                        " FROM workflow_trigger_logs"
+                        " WHERE status = 'running' AND triggered_at IS NOT NULL"
+                    )
+                ).fetchall()
+                for row in rows:
+                    results.append(Observation(int(row.elapsed_sec), {"queue": row.queue_name}))
+        return results
+
+    def _make_depth_cb():
+        def cb(opts: object):
+            return _queue_depth(opts)
+
+        return cb
+
+    def _make_status_cb(target_status: str):
+        def cb(opts: object):
+            all_rows = _task_status_count(opts)
+            return [obs for obs in all_rows if obs.attributes.get("status") == target_status]
+
+        return cb
+
+    def _make_elapsed_cb():
+        def cb(opts: object):
+            return _running_elapsed_seconds(opts)
+
+        return cb
+
+    meter.create_observable_gauge(
+        "celery.queue.depth",
+        callbacks=[_make_depth_cb()],
+        description="Number of pending tasks in each Celery queue (Redis LLEN)",
+        unit="{task}",
+    )
+
+    for status in ("pending", "queued", "running", "failed", "rate_limited"):
+        meter.create_observable_gauge(
+            f"celery.task.{status}",
+            callbacks=[_make_status_cb(status)],
+            description=f"Number of workflow trigger tasks with status={status} in the last hour",
+            unit="{task}",
+        )
+
+    meter.create_observable_gauge(
+        "celery.task.running_elapsed_seconds",
+        callbacks=[_make_elapsed_cb()],
+        description="Elapsed seconds for each currently running workflow trigger task",
+        unit="s",
+    )
+
 
 def init_redis_instrumentor() -> None:
     _new_redis_instrumentor().instrument()
@@ -161,3 +336,4 @@ def init_instruments(app: DifyApp) -> None:
     init_sqlalchemy_instrumentor(app)
     init_redis_instrumentor()
     init_httpx_instrumentor()
+    init_celery_queue_metrics(app)

@@ -1,0 +1,139 @@
+{
+  "title": "Dify Dev Logs",
+  "uid": "dify-dev-logs",
+  "version": 2,
+  "schemaVersion": 38,
+  "refresh": "5s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "current": { "text": "All", "value": "$__all" },
+        "options": [
+          { "text": "All",          "value": "$__all", "selected": true },
+          { "text": "api",          "value": "api" },
+          { "text": "worker",       "value": "worker" },
+          { "text": "beat",         "value": "beat" },
+          { "text": "sandbox",      "value": "sandbox" },
+          { "text": "plugin_daemon","value": "plugin_daemon" },
+          { "text": "db_postgres",  "value": "db_postgres" },
+          { "text": "redis",        "value": "redis" }
+        ],
+        "multi": true,
+        "includeAll": true,
+        "allValue": "api|worker|beat|sandbox|plugin_daemon|db_postgres|redis|ssrf_proxy|weaviate"
+      },
+      {
+        "name": "severity",
+        "label": "Severity",
+        "type": "custom",
+        "current": { "text": "All", "value": "$__all" },
+        "options": [
+          { "text": "All",      "value": "$__all", "selected": true },
+          { "text": "DEBUG",    "value": "DEBUG" },
+          { "text": "INFO",     "value": "INFO" },
+          { "text": "WARNING",  "value": "WARNING" },
+          { "text": "ERROR",    "value": "ERROR" },
+          { "text": "CRITICAL", "value": "CRITICAL" }
+        ],
+        "multi": false,
+        "includeAll": true,
+        "allValue": ".*"
+      },
+      {
+        "name": "trace_id",
+        "label": "Trace ID",
+        "type": "textbox",
+        "current": { "text": ".*", "value": ".*" }
+      },
+      {
+        "name": "workflow_id",
+        "label": "Workflow ID",
+        "type": "textbox",
+        "current": { "text": ".*", "value": ".*" }
+      },
+      {
+        "name": "tenant_id",
+        "label": "Tenant ID",
+        "type": "textbox",
+        "current": { "text": ".*", "value": ".*" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "All Logs  (set Trace ID / Workflow ID / Tenant ID above to filter)",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 18 },
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": false,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{service=~\"$service\"} | json severity=\"severity\", trace_id=\"trace_id\", workflow_id=\"attributes.workflow_id\", app_id=\"attributes.app_id\", tenant_id=\"identity.tenant_id\", user_id=\"identity.user_id\" | severity=~\"$severity\" | trace_id=~\"$trace_id\" | workflow_id=~\"$workflow_id\" | tenant_id=~\"$tenant_id\"",
+          "refId": "A",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Log Volume by Service",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (service) (rate({service=~\"$service\"} [1m]))",
+          "refId": "A",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Error Rate by Service",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (service) (rate({service=~\"api|worker|beat\"} | json | severity=~\"ERROR|CRITICAL\" [1m]))",
+          "refId": "A",
+          "legendFormat": "{{service}} errors/s"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Errors & Criticals",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 26, "w": 24, "h": 10 },
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{service=~\"api|worker|beat\"} | json | severity=~\"ERROR|CRITICAL\"",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

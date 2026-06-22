@@ -1,0 +1,74 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/promtail-positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+
+  # ── Host process logs (API, Worker, Beat) ──────────────────────────────────
+  - job_name: api
+    static_configs:
+      - targets: [localhost]
+        labels:
+          service: api
+          env: dev
+          __path__: /logs/api.log
+    pipeline_stages:
+      - json:
+          expressions:
+            severity: severity
+            trace_id: trace_id
+            req_id: req_id
+      - labels:
+          severity:
+          trace_id:
+
+  - job_name: worker
+    static_configs:
+      - targets: [localhost]
+        labels:
+          service: worker
+          env: dev
+          __path__: /logs/worker.log
+    pipeline_stages:
+      - json:
+          expressions:
+            severity: severity
+            trace_id: trace_id
+      - labels:
+          severity:
+          trace_id:
+
+  - job_name: beat
+    static_configs:
+      - targets: [localhost]
+        labels:
+          service: beat
+          env: dev
+          __path__: /logs/beat.log
+    pipeline_stages:
+      - json:
+          expressions:
+            severity: severity
+      - labels:
+          severity:
+
+  # ── Docker container logs (sandbox, plugin_daemon, etc.) ───────────────────
+  - job_name: dify-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=dify"]
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        regex: /dify-(.+)-\d+
+        target_label: service
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: stream

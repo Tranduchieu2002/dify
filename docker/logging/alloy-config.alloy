@@ -1,0 +1,121 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OTLP Receiver — Dify API/Worker push traces + metrics here (port 4317/4318)
+// ─────────────────────────────────────────────────────────────────────────────
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    metrics = [otelcol.exporter.prometheus.default.input]
+    logs    = [otelcol.exporter.loki.otel.input]
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Traces → Tempo
+// ─────────────────────────────────────────────────────────────────────────────
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Metrics → Prometheus (remote write)
+// ─────────────────────────────────────────────────────────────────────────────
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OTEL logs → Loki
+// ─────────────────────────────────────────────────────────────────────────────
+otelcol.exporter.loki "otel" {
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Host file logs — API, Worker, Beat (JSON structured)
+// ─────────────────────────────────────────────────────────────────────────────
+local.file_match "host_logs" {
+  path_targets = [
+    {__path__ = "/logs/api.log",    service = "api",    env = "dev"},
+    {__path__ = "/logs/worker.log", service = "worker", env = "dev"},
+    {__path__ = "/logs/beat.log",   service = "beat",   env = "dev"},
+  ]
+}
+
+loki.source.file "host" {
+  targets    = local.file_match.host_logs.targets
+  forward_to = [loki.process.json_fields.receiver]
+}
+
+loki.process "json_fields" {
+  // Promote key fields as Loki labels for fast filtering
+  stage.json {
+    expressions = {
+      severity = "severity",
+      trace_id  = "trace_id",
+      req_id    = "req_id",
+    }
+  }
+  stage.labels {
+    values = {
+      severity = "",
+      trace_id = "",
+    }
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Docker container logs — sandbox, plugin_daemon, weaviate, redis, postgres
+// ─────────────────────────────────────────────────────────────────────────────
+discovery.docker "dify_containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=dify"]
+  }
+}
+
+discovery.relabel "dify_containers" {
+  targets = discovery.docker.dify_containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/dify-(.+)-\\d+"
+    target_label  = "service"
+  }
+  rule {
+    target_label = "env"
+    replacement  = "dev"
+  }
+}
+
+loki.source.docker "dify" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.dify_containers.output
+  forward_to       = [loki.write.default.receiver]
+  refresh_interval = "5s"
+}

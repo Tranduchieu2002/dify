@@ -1,0 +1,351 @@
+# docker-compose.test.yaml
+#
+# Full stack built from local source. Use this to verify the build before
+# pushing images or deploying to production.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yaml -p dify-test up --build -d
+#   docker compose -f docker-compose.test.yaml -p dify-test logs -f
+#   docker compose -f docker-compose.test.yaml -p dify-test down -v
+
+x-app-base: &app-base
+  build:
+    context: ..
+    dockerfile: api/Dockerfile
+    args:
+      UV_HTTP_TIMEOUT: "600"
+    network: host
+  env_file:
+    - ./envs/test/shared.env
+  volumes:
+    - app_storage:/app/api/storage
+  restart: unless-stopped
+  depends_on:
+    db_postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+    sandbox:
+      condition: service_started
+  networks:
+    - ssrf_proxy_network
+    - default
+
+services:
+
+  # ── Init: run DB migrations once before api/worker start ──────────────────
+  init:
+    <<: *app-base
+    restart: "no"
+    command: flask db upgrade
+    depends_on:
+      db_postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
+  # ── API ───────────────────────────────────────────────────────────────────
+  api:
+    <<: *app-base
+    environment:
+      MODE: api
+      INNER_API_KEY_FOR_PLUGIN: ${PLUGIN_DIFY_INNER_API_KEY:-QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db_postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Celery worker ─────────────────────────────────────────────────────────
+  worker:
+    <<: *app-base
+    environment:
+      MODE: worker
+      INNER_API_KEY_FOR_PLUGIN: ${PLUGIN_DIFY_INNER_API_KEY:-QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db_postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  # ── Celery beat ───────────────────────────────────────────────────────────
+  worker_beat:
+    <<: *app-base
+    environment:
+      MODE: beat
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  # ── Web frontend ──────────────────────────────────────────────────────────
+  web:
+    image: langgenius/dify-web:1.14.2
+    restart: unless-stopped
+    environment:
+      CONSOLE_API_URL: ""
+      APP_API_URL: ""
+      SERVER_CONSOLE_API_URL: http://api:5001
+      NEXT_PUBLIC_SOCKET_URL: ws://localhost
+      MARKETPLACE_ENABLED: "true"
+      MARKETPLACE_API_URL: https://marketplace.dify.ai
+    networks:
+      - default
+
+  # ── Nginx reverse proxy ───────────────────────────────────────────────────
+  nginx:
+    image: nginx:latest
+    restart: unless-stopped
+    ports:
+      - "${TEST_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template
+      - ./nginx/proxy.conf.template:/etc/nginx/proxy.conf.template
+      - ./nginx/https.conf.template:/etc/nginx/https.conf.template
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint-mount.sh
+      - ./nginx/ssl:/etc/ssl
+    entrypoint:
+      ["sh", "-c", "cp /docker-entrypoint-mount.sh /docker-entrypoint.sh && sed -i 's/\r$$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh && /docker-entrypoint.sh"]
+    environment:
+      NGINX_SERVER_NAME: _
+      NGINX_HTTPS_ENABLED: "false"
+      NGINX_PORT: 80
+      NGINX_WORKER_PROCESSES: auto
+      NGINX_CLIENT_MAX_BODY_SIZE: 100M
+      NGINX_KEEPALIVE_TIMEOUT: 65
+      NGINX_PROXY_READ_TIMEOUT: 3600s
+      NGINX_PROXY_SEND_TIMEOUT: 3600s
+      NGINX_ENABLE_CERTBOT_CHALLENGE: "false"
+      NGINX_SOCKET_IO_UPSTREAM: api:5001
+    depends_on:
+      - api
+      - web
+    networks:
+      - default
+
+  # ── Middleware ────────────────────────────────────────────────────────────
+  db_postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: difyai123456
+      POSTGRES_DB: dify
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "dify"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    networks:
+      - default
+
+  redis:
+    image: redis:6-alpine
+    restart: unless-stopped
+    command: redis-server --requirepass difyai123456
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a difyai123456 ping | grep -q PONG"]
+      interval: 2s
+    networks:
+      - default
+
+  sandbox:
+    image: langgenius/dify-sandbox:0.2.15
+    restart: unless-stopped
+    environment:
+      API_KEY: dify-sandbox
+      GIN_MODE: release
+      WORKER_TIMEOUT: 15
+      ENABLE_NETWORK: "true"
+      HTTP_PROXY: http://ssrf_proxy:3128
+      HTTPS_PROXY: http://ssrf_proxy:3128
+      SANDBOX_PORT: 8194
+    volumes:
+      - sandbox_deps:/dependencies
+    networks:
+      - ssrf_proxy_network
+
+  ssrf_proxy:
+    image: ubuntu/squid:latest
+    restart: unless-stopped
+    volumes:
+      - ./ssrf_proxy/squid.conf.template:/etc/squid/squid.conf.template
+      - ./ssrf_proxy/docker-entrypoint.sh:/docker-entrypoint-mount.sh
+    entrypoint:
+      ["sh", "-c", "cp /docker-entrypoint-mount.sh /docker-entrypoint.sh && sed -i 's/\r$$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh && /docker-entrypoint.sh"]
+    environment:
+      HTTP_PORT: 3128
+      COREDUMP_DIR: /var/spool/squid
+      REVERSE_PROXY_PORT: 8194
+      SANDBOX_HOST: sandbox
+      SANDBOX_PORT: 8194
+    networks:
+      - ssrf_proxy_network
+      - default
+
+  plugin_daemon:
+    image: langgenius/dify-plugin-daemon:0.6.1-local
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DB_DATABASE: dify_plugin
+      DB_USERNAME: postgres
+      DB_PASSWORD: difyai123456
+      DB_HOST: db_postgres
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: difyai123456
+      SERVER_PORT: 5002
+      SERVER_KEY: lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+Sjc3ZtU+qUEi
+      DIFY_INNER_API_URL: http://api:5001
+      DIFY_INNER_API_KEY: QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1
+      PLUGIN_WORKING_PATH: /app/storage/cwd
+      PLUGIN_STORAGE_TYPE: local
+      PLUGIN_STORAGE_LOCAL_ROOT: /app/storage
+      FORCE_VERIFYING_SIGNATURE: "false"
+    volumes:
+      - plugin_storage:/app/storage
+    depends_on:
+      db_postgres:
+        condition: service_healthy
+    networks:
+      - default
+
+  weaviate:
+    image: semitechnologies/weaviate:1.27.0
+    restart: unless-stopped
+    environment:
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "false"
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+      AUTHENTICATION_APIKEY_ENABLED: "true"
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: WVF5YThaHlkYwhGUSmCRgsX3tD5ngdN8pkih
+      AUTHENTICATION_APIKEY_USERS: hello@dify.ai
+      AUTHORIZATION_ADMINLIST_ENABLED: "true"
+      AUTHORIZATION_ADMINLIST_USERS: hello@dify.ai
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    networks:
+      - default
+
+  # ── Observability ─────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.1.0
+    restart: unless-stopped
+    volumes:
+      - ./logging/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 5s
+      retries: 15
+    networks:
+      - default
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    restart: unless-stopped
+    volumes:
+      - ./logging/tempo-config.yml:/etc/tempo/config.yml
+      - tempo_data:/var/tempo
+    command: -config.file=/etc/tempo/config.yml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3200/ready || exit 1"]
+      interval: 5s
+      retries: 15
+    networks:
+      - default
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    volumes:
+      - ./logging/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.retention.time=7d
+    networks:
+      - default
+
+  alloy:
+    image: grafana/alloy:v1.3.0
+    restart: unless-stopped
+    volumes:
+      - ./logging/alloy-config.alloy:/etc/alloy/config.alloy
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --stability.level=generally-available
+    depends_on:
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    networks:
+      - default
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-4000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics traceToLogs"
+    volumes:
+      - ./logging/grafana/provisioning:/etc/grafana/provisioning
+      - ./logging/grafana/dashboards:/etc/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    networks:
+      - default
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_storage:
+  sandbox_deps:
+  plugin_storage:
+  weaviate_data:
+  loki_data:
+  tempo_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  ssrf_proxy_network:
+    driver: bridge
+    internal: true
+  default:
+    driver: bridge

@@ -1473,7 +1473,9 @@ class DraftWorkflowTriggerNodeApi(Resource):
                 query="",
                 files=files,
             )
-            return jsonable_encoder(node_execution)
+            return WorkflowRunNodeExecutionResponse.model_validate(
+                node_execution, from_attributes=True
+            ).model_dump(mode="json")
         except Exception as e:
             logger.exception("Error running draft workflow trigger node")
             return jsonable_encoder(

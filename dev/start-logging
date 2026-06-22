@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+ROOT="$(dirname "$SCRIPT_DIR")"
+LOG_DIR="$ROOT/docker/volumes/logs"
+
+mkdir -p "$LOG_DIR"
+
+echo "Starting observability stack (Alloy + Loki + Tempo + Prometheus + Grafana)..."
+cd "$ROOT/docker"
+DIFY_LOG_DIR="$LOG_DIR" docker compose -f docker-compose.logging.yaml -p dify-logging up -d
+
+echo ""
+echo "┌──────────────────────────────────────────────────────────────────────┐"
+echo "│  Grafana     →  http://localhost:4000  (admin / admin)               │"
+echo "│  Alloy UI    →  http://localhost:12345                               │"
+echo "│  Prometheus  →  http://localhost:9090                                │"
+echo "│  Loki        →  http://localhost:3100                                │"
+echo "│  Tempo       →  http://localhost:3200                                │"
+echo "└──────────────────────────────────────────────────────────────────────┘"
+echo ""
+echo "Start services with log + trace capture:"
+echo ""
+echo "  API:"
+echo "    cd $ROOT/api && \\"
+echo "    LOG_OUTPUT_FORMAT=json LOG_LEVEL=DEBUG \\"
+echo "    uv run flask run --host 0.0.0.0 --port=5001 --debug \\"
+echo "      2>&1 | tee $LOG_DIR/api.log"
+echo ""
+echo "  Worker:"
+echo "    cd $ROOT && \\"
+echo "    LOG_OUTPUT_FORMAT=json LOG_LEVEL=INFO \\"
+echo "    ./dev/start-worker 2>&1 | tee $LOG_DIR/worker.log"
+echo ""
+echo "  Beat:"
+echo "    cd $ROOT/api && \\"
+echo "    LOG_OUTPUT_FORMAT=json LOG_LEVEL=INFO \\"
+echo "    uv run celery -A app.celery beat --loglevel=INFO \\"
+echo "      2>&1 | tee $LOG_DIR/beat.log"
+echo ""
+echo "LogQL quick reference (Grafana → Explore → Loki):"
+echo '  All logs:          {env="dev"}'
+echo '  By service:        {service="api"}'
+echo '  By trace_id:       {env="dev"} | json | trace_id="<id>"'
+echo '  By workflow_id:    {env="dev"} | json workflow_id="attributes.workflow_id" | workflow_id="<id>"'
+echo '  By tenant_id:      {env="dev"} | json tenant_id="identity.tenant_id" | tenant_id="<id>"'
+echo '  By app_id:         {env="dev"} | json app_id="attributes.app_id" | app_id="<id>"'
+echo '  Errors only:       {env="dev"} | json | severity="ERROR"'
+echo ""
+echo "TraceQL quick reference (Grafana → Explore → Tempo):"
+echo '  By trace_id:       { traceDuration > 500ms }'
+echo '  By service:        { resource.service.name = "langgenius/dify" }'
+echo '  By workflow:       { span.workflow_id = "<id>" }'

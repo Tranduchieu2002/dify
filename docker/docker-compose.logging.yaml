@@ -1,0 +1,96 @@
+services:
+  # ── Log storage ─────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.1.0
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./logging/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ── Trace storage ────────────────────────────────────────────────────────────
+  tempo:
+    image: grafana/tempo:2.5.0
+    restart: unless-stopped
+    ports:
+      - "3200:3200"    # HTTP query API
+    volumes:
+      - ./logging/tempo-config.yml:/etc/tempo/config.yml
+      - tempo_data:/var/tempo
+    command: -config.file=/etc/tempo/config.yml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3200/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ── Metrics storage ──────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./logging/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.retention.time=7d
+
+  # ── Collector — receives OTLP from Dify, tails log files, Docker logs ────────
+  alloy:
+    image: grafana/alloy:v1.3.0
+    restart: unless-stopped
+    ports:
+      - "4317:4317"    # OTLP gRPC  ← Dify sends here
+      - "4318:4318"    # OTLP HTTP  ← Dify sends here
+      - "12345:12345"  # Alloy UI
+    volumes:
+      - ./logging/alloy-config.alloy:/etc/alloy/config.alloy
+      - ${DIFY_LOG_DIR:-./volumes/logs}:/logs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --stability.level=generally-available
+    depends_on:
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+
+  # ── Unified UI ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    ports:
+      - "4000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics traceToLogs"
+    volumes:
+      - ./logging/grafana/provisioning:/etc/grafana/provisioning
+      - ./logging/grafana/dashboards:/etc/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+
+volumes:
+  loki_data:
+  tempo_data:
+  prometheus_data:
+  grafana_data:
