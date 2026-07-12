@@ -1,0 +1,95 @@
+# Standalone worker + sandbox-lb + flower stack.
+# Attaches to the existing 'dify' middleware project networks.
+#
+# Usage:
+#   # Start with 1 workflow worker
+#   docker compose -f docker-compose.workers.yaml up -d
+#
+#   # Scale to 3 workflow workers
+#   docker compose -f docker-compose.workers.yaml up -d --scale worker-workflow=3
+#
+#   # Scale sandbox to 3 replicas (scale sandbox in middleware project first)
+#   docker compose -p dify -f docker-compose.middleware.yaml up -d --scale sandbox=3
+#
+#   # Tear down
+#   docker compose -f docker-compose.workers.yaml down
+
+networks:
+  dify_default:
+    external: true
+  dify_ssrf_proxy_network:
+    external: true
+
+x-worker-base: &worker-base
+  image: langgenius/dify-api:1.14.2
+  restart: unless-stopped
+  env_file: ./worker-docker.env
+  volumes:
+    - ./volumes/app/storage:/app/api/storage
+  networks:
+    - dify_default
+    - dify_ssrf_proxy_network
+
+services:
+
+  # ── Workflow workers (scale this) ───────────────────────────────────────────
+  worker-workflow:
+    <<: *worker-base
+    environment:
+      MODE: worker
+      CELERY_WORKER_QUEUES: workflow,workflow_based_app_execution,pipeline,priority_pipeline
+      CELERY_WORKER_CONCURRENCY: ${WORKFLOW_WORKER_CONCURRENCY:-4}
+      CELERY_PREFETCH_MULTIPLIER: "1"
+      MAX_TASKS_PER_CHILD: "50"
+    deploy:
+      replicas: ${WORKFLOW_WORKER_REPLICAS:-1}
+
+  # ── Dataset workers ──────────────────────────────────────────────────────────
+  worker-dataset:
+    <<: *worker-base
+    environment:
+      MODE: worker
+      CELERY_WORKER_QUEUES: dataset,dataset_summary,priority_dataset
+      CELERY_WORKER_CONCURRENCY: ${DATASET_WORKER_CONCURRENCY:-2}
+      CELERY_PREFETCH_MULTIPLIER: "1"
+
+  # ── Ops worker ───────────────────────────────────────────────────────────────
+  worker-ops:
+    <<: *worker-base
+    environment:
+      MODE: worker
+      CELERY_WORKER_QUEUES: >-
+        mail,ops_trace,app_deletion,conversation,api_token,plugin,
+        workflow_storage,retention,schedule_poller,schedule_executor,
+        triggered_workflow_dispatcher,trigger_refresh_publisher,
+        trigger_refresh_executor
+      CELERY_WORKER_CONCURRENCY: "2"
+      CELERY_PREFETCH_MULTIPLIER: "1"
+
+  # ── Sandbox load balancer ────────────────────────────────────────────────────
+  sandbox-lb:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./sandbox-lb.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - dify_ssrf_proxy_network
+      - dify_default
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8194/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Flower ───────────────────────────────────────────────────────────────────
+  flower:
+    image: mher/flower:2.0
+    restart: unless-stopped
+    command: >
+      celery flower
+      --broker=redis://:difyai123456@redis:6379/1
+      --port=5555
+    ports:
+      - "${FLOWER_PORT:-5556}:5555"
+    networks:
+      - dify_default
