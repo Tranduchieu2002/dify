@@ -599,66 +599,77 @@ class WorkflowAppGenerator(BaseAppGenerator):
         :param workflow_thread_pool_id: workflow thread pool id
         :return:
         """
-        with preserve_flask_contexts(flask_app, context_vars=context):
-            with session_factory.create_session() as session:
-                workflow = session.scalar(
-                    select(Workflow).where(
-                        Workflow.tenant_id == application_generate_entity.app_config.tenant_id,
-                        Workflow.app_id == application_generate_entity.app_config.app_id,
-                        Workflow.id == application_generate_entity.app_config.workflow_id,
+        try:
+            with preserve_flask_contexts(flask_app, context_vars=context):
+                with session_factory.create_session() as session:
+                    workflow_id = application_generate_entity.app_config.workflow_id
+                    workflow = session.scalar(
+                        select(Workflow).where(
+                            Workflow.tenant_id == application_generate_entity.app_config.tenant_id,
+                            Workflow.app_id == application_generate_entity.app_config.app_id,
+                            Workflow.id == workflow_id,
+                        )
                     )
+                    if workflow is None:
+                        raise ValueError("Workflow not found")
+
+                    workflow = self._ensure_snippet_start_node_in_worker(session=session, workflow=workflow)
+
+                    # Determine system_user_id based on invocation source
+                    is_external_api_call = application_generate_entity.invoke_from in {
+                        InvokeFrom.WEB_APP,
+                        InvokeFrom.SERVICE_API,
+                    }
+
+                    if is_external_api_call:
+                        # For external API calls, use end user's session ID
+                        end_user = session.scalar(
+                            select(EndUser).where(EndUser.id == application_generate_entity.user_id)
+                        )
+                        system_user_id = end_user.session_id if end_user else ""
+                    else:
+                        # For internal calls, use the original user ID
+                        system_user_id = application_generate_entity.user_id
+
+                runner = WorkflowAppRunner(
+                    application_generate_entity=application_generate_entity,
+                    queue_manager=queue_manager,
+                    variable_loader=variable_loader,
+                    workflow=workflow,
+                    system_user_id=system_user_id,
+                    workflow_execution_repository=workflow_execution_repository,
+                    workflow_node_execution_repository=workflow_node_execution_repository,
+                    root_node_id=root_node_id,
+                    graph_engine_layers=graph_engine_layers,
+                    graph_runtime_state=graph_runtime_state,
                 )
-                if workflow is None:
-                    raise ValueError("Workflow not found")
 
-                workflow = self._ensure_snippet_start_node_in_worker(session=session, workflow=workflow)
-
-                # Determine system_user_id based on invocation source
-                is_external_api_call = application_generate_entity.invoke_from in {
-                    InvokeFrom.WEB_APP,
-                    InvokeFrom.SERVICE_API,
-                }
-
-                if is_external_api_call:
-                    # For external API calls, use end user's session ID
-                    end_user = session.scalar(select(EndUser).where(EndUser.id == application_generate_entity.user_id))
-                    system_user_id = end_user.session_id if end_user else ""
-                else:
-                    # For internal calls, use the original user ID
-                    system_user_id = application_generate_entity.user_id
-
-            runner = WorkflowAppRunner(
-                application_generate_entity=application_generate_entity,
-                queue_manager=queue_manager,
-                variable_loader=variable_loader,
-                workflow=workflow,
-                system_user_id=system_user_id,
-                workflow_execution_repository=workflow_execution_repository,
-                workflow_node_execution_repository=workflow_node_execution_repository,
-                root_node_id=root_node_id,
-                graph_engine_layers=graph_engine_layers,
-                graph_runtime_state=graph_runtime_state,
-            )
-
+                try:
+                    runner.run()
+                except GenerateTaskStoppedError as e:
+                    logger.warning("Task stopped: %s", str(e))
+                except InvokeAuthorizationError:
+                    queue_manager.publish_error(
+                        InvokeAuthorizationError("Incorrect API key provided"), PublishFrom.APPLICATION_MANAGER
+                    )
+                except ValidationError as e:
+                    logger.exception("Validation Error when generating")
+                    queue_manager.publish_error(e, PublishFrom.APPLICATION_MANAGER)
+                except ValueError as e:
+                    if dify_config.DEBUG:
+                        logger.exception("Error when generating")
+                    queue_manager.publish_error(e, PublishFrom.APPLICATION_MANAGER)
+                except Exception as e:
+                    logger.exception("Unknown Error when generating")
+                    queue_manager.publish_error(e, PublishFrom.APPLICATION_MANAGER)
+        except GenerateTaskStoppedError:
+            pass
+        except Exception as e:
+            logger.exception("Fatal error in workflow worker setup")
             try:
-                runner.run()
-            except GenerateTaskStoppedError as e:
-                logger.warning("Task stopped: %s", str(e))
-                pass
-            except InvokeAuthorizationError:
-                queue_manager.publish_error(
-                    InvokeAuthorizationError("Incorrect API key provided"), PublishFrom.APPLICATION_MANAGER
-                )
-            except ValidationError as e:
-                logger.exception("Validation Error when generating")
                 queue_manager.publish_error(e, PublishFrom.APPLICATION_MANAGER)
-            except ValueError as e:
-                if dify_config.DEBUG:
-                    logger.exception("Error when generating")
-                queue_manager.publish_error(e, PublishFrom.APPLICATION_MANAGER)
-            except Exception as e:
-                logger.exception("Unknown Error when generating")
-                queue_manager.publish_error(e, PublishFrom.APPLICATION_MANAGER)
+            except Exception:
+                logger.exception("Failed to publish fatal worker error")
 
     def _handle_response(
         self,
