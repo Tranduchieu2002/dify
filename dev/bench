@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Run the Dify workflow benchmark inside a lightweight Docker container.
+# No local Python install required.
+#
+# Usage (same flags as bench-run.py):
+#   dev/bench                                 # fast workflow, 10 runs, 5 concurrent
+#   dev/bench --workflow heavy -n 20 -c 8
+#   dev/bench --workflow all -n 15 -c 6
+#   dev/bench --workflow code -n 30 -c 10
+#
+# Environment overrides (also forwarded into the container):
+#   DIFY_BASE_URL   - API base (default: http://localhost:5001)
+#   REDIS_HOST      - Redis host (default: localhost)
+#   REDIS_PORT      - Redis port (default: 6380)
+#   REDIS_PASSWORD  - Redis password (default: difyai123456)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="${REPO_ROOT}/bench-run.py"
+
+if [[ ! -f "$SCRIPT" ]]; then
+  echo "ERROR: bench-run.py not found at $REPO_ROOT" >&2
+  exit 1
+fi
+
+# On Linux (WSL2), containers don't resolve 'localhost' to the host
+# automatically. --network host gives the container the host's network
+# stack so localhost:5001 and localhost:6380 work as expected.
+NETWORK_MODE="host"
+
+# Detect macOS / Docker Desktop where --network host is unsupported
+if [[ "$(uname)" == "Darwin" ]]; then
+  NETWORK_MODE="bridge"
+  : "${DIFY_BASE_URL:=http://host.docker.internal:5001}"
+  : "${REDIS_HOST:=host.docker.internal}"
+fi
+
+: "${DIFY_BASE_URL:=http://localhost:5001}"
+: "${REDIS_HOST:=localhost}"
+: "${REDIS_PORT:=6380}"
+: "${REDIS_PASSWORD:=difyai123456}"
+
+echo "Benchmark → ${DIFY_BASE_URL}  |  Redis ${REDIS_HOST}:${REDIS_PORT}"
+echo "Args: $*"
+echo ""
+
+docker run --rm \
+  --network "${NETWORK_MODE}" \
+  -e DIFY_BASE_URL="${DIFY_BASE_URL}" \
+  -e REDIS_HOST="${REDIS_HOST}" \
+  -e REDIS_PORT="${REDIS_PORT}" \
+  -e REDIS_PASSWORD="${REDIS_PASSWORD}" \
+  -v "${SCRIPT}:/bench-run.py:ro" \
+  python:3.12-slim \
+  python /bench-run.py "$@"
