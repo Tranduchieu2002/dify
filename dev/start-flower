@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PORT=${FLOWER_PORT:-5555}
+BROKER="redis://:difyai123456@localhost:6380/1"
+CONTAINER="dify-flower"
+
+# Stop existing container if running
+if docker ps -q --filter "name=${CONTAINER}" | grep -q .; then
+  echo "Flower already running → http://localhost:${PORT}"
+  exit 0
+fi
+
+docker rm -f "${CONTAINER}" 2>/dev/null || true
+
+docker run -d \
+  --network host \
+  --name "${CONTAINER}" \
+  --restart unless-stopped \
+  mher/flower:2.0 \
+  celery flower \
+    --broker="${BROKER}" \
+    --port="${PORT}"
+
+echo "Flower started → http://localhost:${PORT}"

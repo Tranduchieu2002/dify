@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PORT=${FLOWER_PORT:-5555}
+
+echo "Starting Flower on port ${PORT}..."
+cd "$(dirname "$(realpath "$0")")/../api"
+
+uv run --with flower celery -A app.celery flower --port="${PORT}"
