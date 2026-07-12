@@ -1,0 +1,83 @@
+# Scaling overlay for Dify — split workers by queue group, scale sandbox, add Flower.
+#
+# Usage (always compose with the base file):
+#   docker compose -f docker-compose.yaml -f docker-compose.scaling.yaml up -d
+#
+# To scale workflow workers at runtime (no restart needed):
+#   docker compose -f docker-compose.yaml -f docker-compose.scaling.yaml \
+#     up -d --scale worker-workflow=3 --no-recreate
+#
+# To scale sandbox at runtime:
+#   docker compose -f docker-compose.yaml -f docker-compose.scaling.yaml \
+#     up -d --scale sandbox=3 --no-recreate
+
+services:
+
+  # ── Override base worker to handle only low-volume ops queues ────────────
+  worker:
+    environment:
+      MODE: worker
+      CELERY_WORKER_QUEUES: >-
+        mail,ops_trace,app_deletion,conversation,api_token,plugin,
+        workflow_storage,retention,schedule_poller,schedule_executor,
+        triggered_workflow_dispatcher,trigger_refresh_publisher,
+        trigger_refresh_executor,workflow_based_app_execution
+      CELERY_WORKER_CONCURRENCY: ${OPS_WORKER_CONCURRENCY:-2}
+      CELERY_PREFETCH_MULTIPLIER: "1"
+
+  # ── Dedicated workflow workers (scale this group under load) ─────────────
+  worker-workflow:
+    extends:
+      file: docker-compose.yaml
+      service: worker
+    environment:
+      MODE: worker
+      CELERY_WORKER_QUEUES: workflow,pipeline,priority_pipeline
+      CELERY_WORKER_CONCURRENCY: ${WORKFLOW_WORKER_CONCURRENCY:-4}
+      CELERY_PREFETCH_MULTIPLIER: "1"
+      MAX_TASKS_PER_CHILD: "50"
+    deploy:
+      replicas: ${WORKFLOW_WORKER_REPLICAS:-2}
+
+  # ── Dedicated dataset workers ────────────────────────────────────────────
+  worker-dataset:
+    extends:
+      file: docker-compose.yaml
+      service: worker
+    environment:
+      MODE: worker
+      CELERY_WORKER_QUEUES: dataset,dataset_summary,priority_dataset
+      CELERY_WORKER_CONCURRENCY: ${DATASET_WORKER_CONCURRENCY:-2}
+      CELERY_PREFETCH_MULTIPLIER: "1"
+
+  # ── Sandbox load balancer (nginx in front of sandbox replicas) ───────────
+  sandbox-lb:
+    image: nginx:alpine
+    restart: always
+    volumes:
+      - ./sandbox-lb.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - ssrf_proxy_network
+      - default
+    depends_on:
+      - sandbox
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8194/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Flower — Celery monitoring UI (http://localhost:5555) ────────────────
+  flower:
+    image: mher/flower:2.0
+    restart: unless-stopped
+    command: >
+      celery flower
+      --broker=${CELERY_BROKER_URL:-redis://:difyai123456@redis:6379/1}
+      --port=5555
+    ports:
+      - "${FLOWER_PORT:-5555}:5555"
+    networks:
+      - default
+    depends_on:
+      - redis
