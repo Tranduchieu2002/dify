@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dify — Worker & Sandbox Scaling Plan</title>
+<style>
+  /* ── Tokens ── */
+  :root {
+    --bg:        #FAFBFC;
+    --surface:   #FFFFFF;
+    --surface2:  #F0F4F8;
+    --border:    #D8DEE9;
+    --text:      #1C2333;
+    --muted:     #6B7A99;
+    --accent:    #00C9B1;
+    --accent-dim:#E0FAF7;
+    --red:       #E5534B;
+    --red-dim:   #FFF0EF;
+    --yellow:    #D4A017;
+    --yellow-dim:#FFF8E1;
+    --code-bg:   #EFF3F8;
+    --code-border:#C8D0DC;
+    --tag-bg:    #E8F5F3;
+    --tag-text:  #008A79;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #0D1117;
+      --surface:   #161B22;
+      --surface2:  #1C2330;
+      --border:    #2D3748;
+      --text:      #E6EDF3;
+      --muted:     #7D8FA8;
+      --accent:    #00C9B1;
+      --accent-dim:#0D2926;
+      --red:       #F47068;
+      --red-dim:   #2A1A1A;
+      --yellow:    #E3B341;
+      --yellow-dim:#2A2200;
+      --code-bg:   #0D1117;
+      --code-border:#2D3748;
+      --tag-bg:    #0D2926;
+      --tag-text:  #00C9B1;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#FAFBFC; --surface:#FFFFFF; --surface2:#F0F4F8; --border:#D8DEE9;
+    --text:#1C2333; --muted:#6B7A99; --accent:#00C9B1; --accent-dim:#E0FAF7;
+    --red:#E5534B; --red-dim:#FFF0EF; --yellow:#D4A017; --yellow-dim:#FFF8E1;
+    --code-bg:#EFF3F8; --code-border:#C8D0DC; --tag-bg:#E8F5F3; --tag-text:#008A79;
+  }
+  :root[data-theme="dark"] {
+    --bg:#0D1117; --surface:#161B22; --surface2:#1C2330; --border:#2D3748;
+    --text:#E6EDF3; --muted:#7D8FA8; --accent:#00C9B1; --accent-dim:#0D2926;
+    --red:#F47068; --red-dim:#2A1A1A; --yellow:#E3B341; --yellow-dim:#2A2200;
+    --code-bg:#0D1117; --code-border:#2D3748; --tag-bg:#0D2926; --tag-text:#00C9B1;
+  }
+
+  /* ── Reset & Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 15px; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.65;
+    padding: 0;
+  }
+  a { color: var(--accent); text-decoration: none; }
+
+  /* ── Typography ── */
+  h1, h2, h3, h4, .label {
+    font-family: 'SFMono-Regular', 'Menlo', 'Cascadia Code', 'Consolas', monospace;
+    letter-spacing: -0.02em;
+  }
+  h1 { font-size: 2rem; font-weight: 700; line-height: 1.2; text-wrap: balance; }
+  h2 { font-size: 1.15rem; font-weight: 600; color: var(--text); margin-bottom: 1rem; }
+  h3 { font-size: 0.92rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.6rem; }
+  p { max-width: 68ch; color: var(--text); }
+  .label {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--muted);
+  }
+
+  /* ── Layout ── */
+  .page { max-width: 860px; margin: 0 auto; padding: 3rem 2rem 6rem; }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2rem;
+    margin-bottom: 3rem;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    background: var(--accent-dim); color: var(--accent);
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
+    padding: 0.25rem 0.65rem; border-radius: 4px; margin-bottom: 1rem;
+  }
+  .eyebrow::before { content: '//'; opacity: 0.6; }
+  header p { font-size: 0.95rem; color: var(--muted); margin-top: 0.75rem; max-width: 58ch; }
+  .theme-toggle {
+    float: right; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); font-family: inherit; font-size: 0.78rem;
+    padding: 0.3rem 0.75rem; border-radius: 4px; cursor: pointer;
+    margin-top: 0.25rem;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Sections ── */
+  section { margin-bottom: 3rem; }
+  .section-header {
+    display: flex; align-items: center; gap: 0.75rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-num {
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.72rem; font-weight: 700; color: var(--accent);
+    background: var(--accent-dim); padding: 0.15rem 0.45rem; border-radius: 3px;
+  }
+  .section-header h2 { margin: 0; }
+
+  /* ── Architecture Diagram ── */
+  .arch {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    overflow-x: auto;
+  }
+  .arch-row {
+    display: flex; align-items: center; gap: 0; flex-wrap: nowrap;
+    margin-bottom: 0.75rem; min-width: 560px;
+  }
+  .arch-row:last-child { margin-bottom: 0; }
+  .abox {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.4rem 0.75rem; min-width: 90px; text-align: center;
+    background: var(--surface2);
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.72rem; font-weight: 600; color: var(--text);
+    flex-shrink: 0;
+  }
+  .abox.accent { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  .abox.multi { border-style: dashed; }
+  .abox .sub { font-size: 0.62rem; color: var(--muted); font-weight: 400; margin-top: 0.15rem; }
+  .arrow {
+    font-family: 'SFMono-Regular', monospace; color: var(--muted);
+    font-size: 0.8rem; padding: 0 0.35rem; flex-shrink: 0;
+  }
+  .arch-group {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    flex-shrink: 0;
+  }
+  .arch-legend {
+    margin-top: 1rem; display: flex; gap: 1.25rem; flex-wrap: wrap;
+    font-size: 0.72rem; color: var(--muted);
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+  }
+  .arch-legend span { display: flex; align-items: center; gap: 0.35rem; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .dot.accent { background: var(--accent); }
+  .dot.muted { background: var(--border); }
+  .dot.dash { background: transparent; border: 1px dashed var(--muted); }
+
+  /* ── Cards & Grid ── */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.1rem 1.25rem;
+  }
+  .card h3 { margin-bottom: 0.5rem; }
+  .card ul { padding-left: 0; list-style: none; }
+  .card ul li {
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.72rem; color: var(--muted);
+    padding: 0.15rem 0;
+    border-bottom: 1px solid var(--surface2);
+  }
+  .card ul li:last-child { border: none; }
+  .card ul li::before { content: '→ '; color: var(--accent); }
+
+  /* ── Code Blocks ── */
+  .code-label {
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.68rem; color: var(--muted); margin-bottom: 0.3rem;
+    padding-left: 0.1rem; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    margin-bottom: 1.25rem;
+    font-size: 0.78rem;
+    line-height: 1.7;
+  }
+  code {
+    font-family: 'SFMono-Regular', 'Menlo', 'Cascadia Code', 'Consolas', monospace;
+  }
+  .c-comment { color: var(--muted); }
+  .c-key { color: #569CD6; }
+  .c-val { color: var(--accent); }
+  .c-str { color: #CE9178; }
+  .c-env { color: #DCDCAA; }
+  .c-bash { color: #B5CEA8; }
+
+  /* ── Inline code ── */
+  p code, li code {
+    background: var(--code-bg); border: 1px solid var(--code-border);
+    padding: 0.1rem 0.35rem; border-radius: 3px;
+    font-size: 0.82em;
+  }
+
+  /* ── Tags / Badges ── */
+  .tag {
+    display: inline-flex; align-items: center;
+    background: var(--tag-bg); color: var(--tag-text);
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.04em;
+    padding: 0.15rem 0.5rem; border-radius: 3px; margin: 0.15rem 0.1rem;
+    white-space: nowrap;
+  }
+  .tag.warn {
+    background: var(--yellow-dim); color: var(--yellow);
+  }
+  .tag.danger { background: var(--red-dim); color: var(--red); }
+
+  /* ── Alert boxes ── */
+  .alert {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-dim);
+    padding: 0.75rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+  }
+  .alert.warn { border-color: var(--yellow); background: var(--yellow-dim); }
+  .alert strong {
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase;
+    display: block; margin-bottom: 0.3rem; color: var(--accent);
+  }
+  .alert.warn strong { color: var(--yellow); }
+
+  /* ── Verify checklist ── */
+  .checklist { list-style: none; padding: 0; }
+  .checklist li {
+    display: flex; align-items: flex-start; gap: 0.75rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+  }
+  .checklist li:last-child { border: none; }
+  .check-icon {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid var(--accent);
+    flex-shrink: 0; margin-top: 0.1rem;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.65rem; color: var(--accent);
+  }
+  .check-title { font-weight: 600; display: block; margin-bottom: 0.2rem; }
+  .check-cmd {
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.72rem; color: var(--muted);
+    background: var(--code-bg); border: 1px solid var(--code-border);
+    display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px;
+    margin-top: 0.2rem;
+  }
+
+  /* ── Two column ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ── Param table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th {
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+    text-align: left; padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid var(--border);
+  }
+  td { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td:first-child { font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 0.75rem; color: var(--accent); }
+  td:nth-child(2) { font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 0.75rem; color: var(--muted); }
+  tr:last-child td { border: none; }
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+
+  /* ── Footer ── */
+  footer {
+    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+    font-size: 0.78rem; color: var(--muted);
+    font-family: 'SFMono-Regular', 'Menlo', monospace;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+  }
+
+  @media (max-width: 520px) {
+    .page { padding: 1.5rem 1rem 4rem; }
+    h1 { font-size: 1.4rem; }
+    .arch { padding: 1rem 0.75rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Header ── -->
+  <header>
+    <button class="theme-toggle" onclick="toggleTheme()">toggle theme</button>
+    <div class="eyebrow">INFRA PLAN</div>
+    <h1>Worker & Sandbox<br>Scaling Plan</h1>
+    <p>Split Celery workers by queue group, scale sandbox horizontally, and verify the whole stack under workflow load.</p>
+  </header>
+
+  <!-- ── 0: Current vs Target ── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">00</span>
+      <h2>Architecture — current vs target</h2>
+    </div>
+
+    <div class="two-col" style="margin-bottom:1.5rem;">
+      <div>
+        <h3>Current (single worker)</h3>
+        <div class="arch">
+          <div class="arch-row">
+            <div class="abox">nginx</div>
+            <span class="arrow">→</span>
+            <div class="abox">api</div>
+            <span class="arrow">→</span>
+            <div class="abox">redis</div>
+          </div>
+          <div class="arch-row">
+            <div class="abox" style="visibility:hidden;">nginx</div>
+            <span class="arrow" style="visibility:hidden;">→</span>
+            <div class="abox" style="visibility:hidden;">api</div>
+            <span class="arrow">↓</span>
+            <div class="abox"><span style="color:var(--red)">worker</span><span class="sub">all 20 queues</span></div>
+          </div>
+          <div class="arch-row">
+            <div class="abox" style="visibility:hidden;">x</div>
+            <span class="arrow" style="visibility:hidden;">→</span>
+            <div class="abox" style="visibility:hidden;">x</div>
+            <span class="arrow">→</span>
+            <div class="abox">sandbox<span class="sub">×1</span></div>
+          </div>
+        </div>
+        <div class="alert warn" style="margin-top:0.75rem; font-size:0.82rem;">
+          <strong>Problem</strong>
+          A single worker handles workflows, dataset jobs, and mail concurrently. One slow dataset import starves running workflows.
+        </div>
+      </div>
+
+      <div>
+        <h3>Target (split + scaled)</h3>
+        <div class="arch">
+          <div class="arch-row">
+            <div class="abox">nginx</div>
+            <span class="arrow">→</span>
+            <div class="abox">api</div>
+            <span class="arrow">→</span>
+            <div class="abox">redis</div>
+          </div>
+          <div class="arch-row" style="margin-top:0.25rem;">
+            <div style="width:90px;flex-shrink:0"></div>
+            <span class="arrow"></span>
+            <div class="arch-group" style="margin-left:0.25rem;">
+              <div class="abox accent multi">worker-workflow<span class="sub">×2–4 replicas</span></div>
+              <div class="abox multi">worker-dataset<span class="sub">×1</span></div>
+              <div class="abox multi">worker-ops<span class="sub">×1</span></div>
+            </div>
+            <span class="arrow">→</span>
+            <div class="arch-group">
+              <div class="abox accent">sandbox-lb<span class="sub">nginx</span></div>
+              <span class="arrow" style="text-align:center; padding:0;">↓</span>
+              <div class="abox multi">sandbox<span class="sub">×2–3</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="alert" style="margin-top:0.75rem; font-size:0.82rem;">
+          <strong>Result</strong>
+          Workflow queues get dedicated CPU. Sandbox scales out for parallel code node execution. Queue depth is visible per worker group.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 1: Split Worker Services ── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>Split Celery workers by queue group</h2>
+    </div>
+
+    <p style="margin-bottom:1.25rem;">
+      The existing entrypoint already supports <code>CELERY_WORKER_QUEUES</code> to override which queues a container consumes. Add three worker service definitions — replace the single <code>worker</code> service in <code>docker-compose.yaml</code>.
+    </p>
+
+    <div class="card-grid" style="margin-bottom:1.25rem;">
+      <div class="card">
+        <h3>worker-workflow</h3>
+        <p style="font-size:0.8rem; color:var(--muted); margin-bottom:0.6rem;">Scale this one up first under load.</p>
+        <ul>
+          <li>workflow</li>
+          <li>workflow_based_app_execution</li>
+          <li>pipeline</li>
+          <li>priority_pipeline</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>worker-dataset</h3>
+        <p style="font-size:0.8rem; color:var(--muted); margin-bottom:0.6rem;">Isolated so indexing can't block runs.</p>
+        <ul>
+          <li>dataset</li>
+          <li>dataset_summary</li>
+          <li>priority_dataset</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>worker-ops</h3>
+        <p style="font-size:0.8rem; color:var(--muted); margin-bottom:0.6rem;">Low-volume background jobs.</p>
+        <ul>
+          <li>mail, ops_trace, conversation</li>
+          <li>api_token, plugin, retention</li>
+          <li>schedule_poller/executor</li>
+          <li>trigger_refresh_*</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="code-label">docker/docker-compose.yaml — worker section replacement</div>
+    <pre><code><span class="c-comment">  # ── Workflow worker (scale this horizontally)</span>
+  <span class="c-key">worker-workflow</span>:
+    <<: <span class="c-str">*shared-worker-config</span>
+    <span class="c-key">environment</span>:
+      <<: <span class="c-str">*shared-api-worker-env</span>
+      <span class="c-env">MODE</span>: <span class="c-val">worker</span>
+      <span class="c-env">CELERY_WORKER_QUEUES</span>: <span class="c-val">workflow,workflow_based_app_execution,pipeline,priority_pipeline</span>
+      <span class="c-env">CELERY_WORKER_CONCURRENCY</span>: <span class="c-val">${WORKFLOW_WORKER_CONCURRENCY:-4}</span>
+      <span class="c-env">CELERY_PREFETCH_MULTIPLIER</span>: <span class="c-val">1</span>
+      <span class="c-env">MAX_TASKS_PER_CHILD</span>: <span class="c-val">50</span>
+    <span class="c-key">deploy</span>:
+      <span class="c-key">replicas</span>: <span class="c-val">${WORKFLOW_WORKER_REPLICAS:-2}</span>
+
+  <span class="c-comment">  # ── Dataset worker (keep at 1 unless indexing is a bottleneck)</span>
+  <span class="c-key">worker-dataset</span>:
+    <<: <span class="c-str">*shared-worker-config</span>
+    <span class="c-key">environment</span>:
+      <<: <span class="c-str">*shared-api-worker-env</span>
+      <span class="c-env">MODE</span>: <span class="c-val">worker</span>
+      <span class="c-env">CELERY_WORKER_QUEUES</span>: <span class="c-val">dataset,dataset_summary,priority_dataset</span>
+      <span class="c-env">CELERY_WORKER_CONCURRENCY</span>: <span class="c-val">${DATASET_WORKER_CONCURRENCY:-2}</span>
+      <span class="c-env">CELERY_PREFETCH_MULTIPLIER</span>: <span class="c-val">1</span>
+
+  <span class="c-comment">  # ── Ops worker (mail, triggers, retention, plugins)</span>
+  <span class="c-key">worker-ops</span>:
+    <<: <span class="c-str">*shared-worker-config</span>
+    <span class="c-key">environment</span>:
+      <<: <span class="c-str">*shared-api-worker-env</span>
+      <span class="c-env">MODE</span>: <span class="c-val">worker</span>
+      <span class="c-env">CELERY_WORKER_QUEUES</span>: <span class="c-val">mail,ops_trace,app_deletion,conversation,api_token,plugin,workflow_storage,retention,schedule_poller,schedule_executor,triggered_workflow_dispatcher,trigger_refresh_publisher,trigger_refresh_executor</span>
+      <span class="c-env">CELERY_WORKER_CONCURRENCY</span>: <span class="c-val">${OPS_WORKER_CONCURRENCY:-2}</span></code></pre>
+
+    <div class="alert">
+      <strong>Why PREFETCH_MULTIPLIER=1</strong>
+      The default Celery prefetch is 4. Each worker greedily reserves tasks before processing them, so one slow workflow node can lock up 4 task slots. Setting it to 1 means each worker holds exactly one task at a time — fairer queue draining under mixed load.
+    </div>
+  </section>
+
+  <!-- ── 2: Sandbox Scale ── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Scale sandbox with an internal load balancer</h2>
+    </div>
+
+    <p style="margin-bottom:1rem;">
+      Sandbox has no host-port mapping so <code>docker compose up --scale sandbox=3</code> works — but then <code>CODE_EXECUTION_ENDPOINT</code> still points at a single container name. Add a minimal nginx as a load balancer on <code>ssrf_proxy_network</code>.
+    </p>
+
+    <div class="code-label">docker/sandbox-lb.conf</div>
+    <pre><code><span class="c-key">upstream</span> sandbox_pool {
+    <span class="c-val">least_conn</span>;
+    <span class="c-key">server</span> sandbox:8194;      <span class="c-comment"># Docker resolves all replicas via DNS round-robin</span>
+}
+
+<span class="c-key">server</span> {
+    <span class="c-key">listen</span> 8194;
+
+    <span class="c-key">location</span> / {
+        <span class="c-key">proxy_pass</span>         <span class="c-val">http://sandbox_pool</span>;
+        <span class="c-key">proxy_read_timeout</span> <span class="c-val">90s</span>;
+        <span class="c-key">proxy_send_timeout</span> <span class="c-val">30s</span>;
+        <span class="c-key">proxy_set_header</span>   Host $host;
+    }
+
+    <span class="c-key">location</span> /health {
+        <span class="c-key">access_log</span> off;
+        <span class="c-key">return</span> <span class="c-val">200 "ok\n"</span>;
+    }
+}</code></pre>
+
+    <div class="code-label">docker/docker-compose.yaml — sandbox section</div>
+    <pre><code>  <span class="c-key">sandbox</span>:
+    <span class="c-key">image</span>: <span class="c-val">langgenius/dify-sandbox:0.2.15</span>
+    <span class="c-key">networks</span>: [ssrf_proxy_network]
+    <span class="c-key">deploy</span>:
+      <span class="c-key">replicas</span>: <span class="c-val">${SANDBOX_REPLICAS:-2}</span>
+    <span class="c-comment">  # Remove the static port mapping here if present — replicas need it gone</span>
+
+  <span class="c-key">sandbox-lb</span>:
+    <span class="c-key">image</span>: <span class="c-val">nginx:alpine</span>
+    <span class="c-key">networks</span>: [ssrf_proxy_network, default]
+    <span class="c-key">volumes</span>:
+      - <span class="c-str">./sandbox-lb.conf:/etc/nginx/conf.d/default.conf:ro</span>
+    <span class="c-key">depends_on</span>: [sandbox]
+    <span class="c-key">restart</span>: always</code></pre>
+
+    <div class="code-label">.env — point api/worker at the lb</div>
+    <pre><code><span class="c-env">CODE_EXECUTION_ENDPOINT</span>=<span class="c-val">http://sandbox-lb:8194</span>
+<span class="c-env">SANDBOX_REPLICAS</span>=<span class="c-val">2</span>
+<span class="c-env">WORKFLOW_WORKER_REPLICAS</span>=<span class="c-val">2</span>
+<span class="c-env">WORKFLOW_WORKER_CONCURRENCY</span>=<span class="c-val">4</span></code></pre>
+
+    <div class="alert warn">
+      <strong>Deploy flag</strong>
+      <code>deploy.replicas</code> is honored by Docker Compose v2 in plain <code>docker compose up</code>. In Swarm mode (<code>docker stack deploy</code>) it works the same way. You do NOT need Kubernetes for this.
+    </div>
+  </section>
+
+  <!-- ── 3: Celery Tuning ── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>Celery knobs to tune for workflow load</h2>
+    </div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Env var</th><th>Recommended value</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>CELERY_PREFETCH_MULTIPLIER</td>
+            <td>1</td>
+            <td>Prevent task hoarding. Each worker slot holds exactly one task — fairer under mixed workflow sizes.</td>
+          </tr>
+          <tr>
+            <td>CELERY_WORKER_CONCURRENCY<br><em>(workflow workers)</em></td>
+            <td>4–8</td>
+            <td>Workflow tasks are I/O-heavy (LLM calls). 4–8 gevent greenthreads per container is a good start; increase until CPU is the bottleneck.</td>
+          </tr>
+          <tr>
+            <td>MAX_TASKS_PER_CHILD</td>
+            <td>50</td>
+            <td>Already the default. Recycles worker processes to prevent memory leaks from long-running sessions.</td>
+          </tr>
+          <tr>
+            <td>CELERY_WORKER_CLASS / POOL</td>
+            <td>gevent</td>
+            <td>Already the default. Gevent's green-thread pool handles async LLM streaming without forking — ideal for workflow tasks.</td>
+          </tr>
+          <tr>
+            <td>CELERY_AUTO_SCALE</td>
+            <td>false</td>
+            <td>Pin concurrency at a known value per container; scale via replicas, not autoscale — easier to reason about under load.</td>
+          </tr>
+          <tr>
+            <td>CODE_EXECUTION_POOL_MAX_CONNECTIONS</td>
+            <td>100 × sandbox replicas</td>
+            <td>Default 100 is per-process. With 2 sandbox replicas and 2 worker replicas, the lb can handle 200 concurrent sandbox calls.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── 4: Add Flower ── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>Add Flower — Celery monitoring UI</h2>
+    </div>
+
+    <p style="margin-bottom:1rem;">Flower gives you a real-time view of queue depths, active tasks per worker, and task history. Add it to the compose stack.</p>
+
+    <div class="code-label">docker/docker-compose.yaml — append</div>
+    <pre><code>  <span class="c-key">flower</span>:
+    <span class="c-key">image</span>: <span class="c-val">mher/flower:2.0</span>
+    <span class="c-key">command</span>: <span class="c-val">celery flower --broker=${CELERY_BROKER_URL} --port=5555</span>
+    <span class="c-key">environment</span>:
+      <span class="c-env">CELERY_BROKER_URL</span>: <span class="c-val">${CELERY_BROKER_URL:-redis://:difyai123456@redis:6379/1}</span>
+    <span class="c-key">ports</span>:
+      - <span class="c-str">"5555:5555"</span>
+    <span class="c-key">networks</span>: [default]
+    <span class="c-key">depends_on</span>: [redis]
+    <span class="c-key">restart</span>: always</code></pre>
+
+    <p>Access Flower at <code>http://localhost:5555</code>. You can see each worker-workflow container as a separate node, its active task count, and queue depth in real time.</p>
+  </section>
+
+  <!-- ── 5: Verify ── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>How to know it's working</h2>
+    </div>
+
+    <ul class="checklist">
+
+      <li>
+        <div class="check-icon">1</div>
+        <div>
+          <span class="check-title">All workers register on startup</span>
+          Run this — you should see three separate worker hostnames (<code>worker-workflow@…</code>, <code>worker-dataset@…</code>, <code>worker-ops@…</code>) respond to the ping.
+          <div><code class="check-cmd">docker compose exec worker-workflow celery -A celery_entrypoint inspect ping</code></div>
+        </div>
+      </li>
+
+      <li>
+        <div class="check-icon">2</div>
+        <div>
+          <span class="check-title">Each worker only consumes its assigned queues</span>
+          The <code>active_queues</code> report must NOT show <code>dataset</code> on the workflow worker, or <code>workflow</code> on the ops worker.
+          <div><code class="check-cmd">docker compose exec worker-workflow celery -A celery_entrypoint inspect active_queues</code></div>
+        </div>
+      </li>
+
+      <li>
+        <div class="check-icon">3</div>
+        <div>
+          <span class="check-title">Sandbox LB distributes load across replicas</span>
+          Hit the sandbox health endpoint multiple times — you should see different container IDs in nginx access logs.
+          <div><code class="check-cmd">docker compose logs sandbox-lb --follow</code></div>
+          Then fire a Code node workflow and watch requests spread across the sandbox containers.
+        </div>
+      </li>
+
+      <li>
+        <div class="check-icon">4</div>
+        <div>
+          <span class="check-title">Queue depth stays low under sustained load</span>
+          Watch Redis queue length for the workflow queue. If it grows continuously, add another <code>worker-workflow</code> replica.
+          <div><code class="check-cmd">watch -n 2 'docker compose exec redis redis-cli llen workflow'</code></div>
+          Target: queue length below 10 under normal load. Above 50 = add a replica.
+        </div>
+      </li>
+
+      <li>
+        <div class="check-icon">5</div>
+        <div>
+          <span class="check-title">Active task count scales with replicas</span>
+          Open <strong>Flower</strong> at <code>http://localhost:5555</code>. Fire 20 concurrent workflow runs (use the existing <code>test-workflow.yml</code>). The <em>Active</em> column for each worker-workflow node should fill up proportionally — not one node saturated while others idle.
+        </div>
+      </li>
+
+      <li>
+        <div class="check-icon">6</div>
+        <div>
+          <span class="check-title">Dataset jobs don't delay workflow runs</span>
+          Trigger a large dataset re-index while running workflows concurrently. Workflow run times should be unaffected. Before this split, they would slow down because one worker pool served both.
+        </div>
+      </li>
+
+      <li>
+        <div class="check-icon">7</div>
+        <div>
+          <span class="check-title">Existing Grafana/Loki stack shows throughput</span>
+          Your <code>docker-compose.logging.yaml</code> already runs Loki + Grafana. Import a Celery task latency dashboard in Grafana. Look for:
+          <br>— P95 task runtime for <code>workflow</code> queue tasks staying flat as replicas scale.
+          <br>— No error spikes in the API container logs during scale-up.
+          <div><code class="check-cmd">docker compose -f docker-compose.yaml -f docker-compose.logging.yaml up -d</code></div>
+        </div>
+      </li>
+
+    </ul>
+  </section>
+
+  <!-- ── Quick start ── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2>Minimal quick-start sequence</h2>
+    </div>
+
+    <div class="code-label">Step-by-step</div>
+    <pre><code><span class="c-comment"># 1. Apply compose changes, then bring up with 2 workflow workers + 2 sandboxes</span>
+<span class="c-bash">WORKFLOW_WORKER_REPLICAS=2 SANDBOX_REPLICAS=2 \
+  docker compose up -d --scale sandbox=2</span>
+
+<span class="c-comment"># 2. Confirm all three worker groups are alive</span>
+<span class="c-bash">docker compose ps | grep worker</span>
+
+<span class="c-comment"># 3. Verify queue assignments</span>
+<span class="c-bash">docker compose exec worker-workflow-1 \
+  celery -A celery_entrypoint inspect active_queues</span>
+
+<span class="c-comment"># 4. Watch queue depth live</span>
+<span class="c-bash">watch -n 2 'docker compose exec redis redis-cli llen workflow'</span>
+
+<span class="c-comment"># 5. Open Flower dashboard</span>
+<span class="c-bash">open http://localhost:5555</span>
+
+<span class="c-comment"># 6. Fire test workflow runs (import test-workflow.yml in the UI, run ×10)</span>
+<span class="c-comment"># → Flower should show tasks spread across worker-workflow-1 and worker-workflow-2</span></code></pre>
+  </section>
+
+  <footer>
+    <span>Dify scaling plan · generated 2026-07-12</span>
+    <span>apply to docker/docker-compose.yaml · docker/sandbox-lb.conf · .env</span>
+  </footer>
+</div>
+
+<script>
+  function toggleTheme() {
+    const root = document.documentElement;
+    const cur = root.getAttribute('data-theme');
+    const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (!cur) { root.setAttribute('data-theme', sys === 'dark' ? 'light' : 'dark'); }
+    else if (cur === 'dark') { root.setAttribute('data-theme', 'light'); }
+    else { root.removeAttribute('data-theme'); }
+  }
+</script>
+</body>
+</html>

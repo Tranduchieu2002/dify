@@ -1,0 +1,596 @@
+<title>Dify — Scaling & Test Operations Guide</title>
+<style>
+  :root {
+    --bg: #0D1117; --surface: #161B22; --surface2: #1C2330;
+    --border: #2D3748; --text: #E6EDF3; --muted: #7D8FA8;
+    --accent: #00C9B1; --accent-dim: #0A2926;
+    --green: #3FB950; --green-dim: #0D2A14;
+    --yellow: #E3B341; --yellow-dim: #2A2200;
+    --red: #F47068; --red-dim: #2A1010;
+    --code-bg: #090D12; --code-border: #21262D;
+    --mono: 'SFMono-Regular','Menlo','Cascadia Code','Consolas',monospace;
+    --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#F6F8FA; --surface:#FFFFFF; --surface2:#F0F4F8;
+      --border:#D0D7DE; --text:#1F2328; --muted:#656D76;
+      --accent:#008A79; --accent-dim:#E0FAF7;
+      --green:#1A7F37; --green-dim:#DAFBE1;
+      --yellow:#9A6700; --yellow-dim:#FFF8C5;
+      --red:#CF222E; --red-dim:#FFEBE9;
+      --code-bg:#F6F8FA; --code-border:#D0D7DE;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#0D1117; --surface:#161B22; --surface2:#1C2330; --border:#2D3748;
+    --text:#E6EDF3; --muted:#7D8FA8; --accent:#00C9B1; --accent-dim:#0A2926;
+    --green:#3FB950; --green-dim:#0D2A14; --yellow:#E3B341; --yellow-dim:#2A2200;
+    --red:#F47068; --red-dim:#2A1010; --code-bg:#090D12; --code-border:#21262D;
+  }
+  :root[data-theme="light"] {
+    --bg:#F6F8FA; --surface:#FFFFFF; --surface2:#F0F4F8; --border:#D0D7DE;
+    --text:#1F2328; --muted:#656D76; --accent:#008A79; --accent-dim:#E0FAF7;
+    --green:#1A7F37; --green-dim:#DAFBE1; --yellow:#9A6700; --yellow-dim:#FFF8C5;
+    --red:#CF222E; --red-dim:#FFEBE9; --code-bg:#F6F8FA; --code-border:#D0D7DE;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 14px; scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.6; }
+
+  /* layout */
+  .layout { display: flex; min-height: 100vh; }
+  nav {
+    width: 220px; flex-shrink: 0; background: var(--surface);
+    border-right: 1px solid var(--border); padding: 1.5rem 0;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  nav .logo {
+    font-family: var(--mono); font-size: 0.78rem; font-weight: 700;
+    color: var(--accent); padding: 0 1.25rem 1rem;
+    border-bottom: 1px solid var(--border); margin-bottom: 1rem;
+  }
+  nav a {
+    display: block; padding: 0.3rem 1.25rem;
+    font-size: 0.78rem; color: var(--muted); text-decoration: none;
+    font-family: var(--mono); border-left: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  nav a:hover, nav a.active { color: var(--accent); border-left-color: var(--accent); }
+  nav .nav-section { font-size: 0.65rem; color: var(--muted); padding: 0.75rem 1.25rem 0.2rem;
+    text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.6; }
+
+  main { flex: 1; padding: 2.5rem 3rem; max-width: 860px; }
+
+  /* typography */
+  h1 { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; margin-bottom: 0.4rem; }
+  h2 { font-family: var(--mono); font-size: 1rem; font-weight: 600; margin: 2.5rem 0 1rem;
+    padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); color: var(--text); }
+  h3 { font-family: var(--mono); font-size: 0.82rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em; margin: 1.5rem 0 0.6rem; }
+  p { color: var(--text); margin-bottom: 0.75rem; font-size: 0.88rem; max-width: 68ch; }
+
+  /* code */
+  pre {
+    background: var(--code-bg); border: 1px solid var(--code-border);
+    border-radius: 6px; padding: 1rem 1.25rem; overflow-x: auto;
+    margin-bottom: 1rem; font-size: 0.78rem; line-height: 1.75;
+  }
+  code { font-family: var(--mono); }
+  p code, li code {
+    background: var(--code-bg); border: 1px solid var(--code-border);
+    padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82em;
+  }
+  .c-comment { color: var(--muted); }
+  .c-key { color: #79C0FF; }
+  .c-val { color: var(--accent); }
+  .c-cmd { color: #A5D6FF; }
+  .c-flag { color: #FFA657; }
+  .c-str { color: #A8FF8A; }
+
+  /* callouts */
+  .tip, .warn, .info {
+    border-left: 3px solid var(--accent); background: var(--accent-dim);
+    padding: 0.7rem 1rem; border-radius: 0 6px 6px 0;
+    margin-bottom: 1rem; font-size: 0.83rem;
+  }
+  .warn { border-color: var(--yellow); background: var(--yellow-dim); }
+  .info { border-color: var(--green); background: var(--green-dim); }
+  .tip strong, .warn strong, .info strong {
+    font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.08em; display: block; margin-bottom: 0.3rem; color: var(--accent);
+  }
+  .warn strong { color: var(--yellow); }
+  .info strong { color: var(--green); }
+
+  /* tables */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); margin-bottom: 1.25rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); font-weight: 600;
+    text-align: left; padding: 0.6rem 0.9rem; border-bottom: 2px solid var(--border); }
+  td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td:first-child { font-family: var(--mono); font-size: 0.78rem; color: var(--accent); white-space: nowrap; }
+  tr:last-child td { border: none; }
+
+  /* badges */
+  .badge {
+    display: inline-block; font-family: var(--mono); font-size: 0.65rem; font-weight: 700;
+    padding: 0.1rem 0.4rem; border-radius: 3px; letter-spacing: 0.04em;
+  }
+  .badge-green { background: var(--green-dim); color: var(--green); }
+  .badge-yellow { background: var(--yellow-dim); color: var(--yellow); }
+  .badge-red { background: var(--red-dim); color: var(--red); }
+
+  /* section separators */
+  .section { margin-bottom: 2.5rem; }
+  .step { display: flex; gap: 0.9rem; margin-bottom: 1.25rem; }
+  .step-num {
+    font-family: var(--mono); font-size: 0.7rem; font-weight: 700;
+    color: var(--accent); background: var(--accent-dim);
+    padding: 0.15rem 0.5rem; border-radius: 3px; height: fit-content;
+    margin-top: 0.1rem; flex-shrink: 0;
+  }
+  .step-body { flex: 1; }
+  .step-body p { margin-bottom: 0.4rem; }
+
+  /* header */
+  header {
+    border-bottom: 1px solid var(--border); margin-bottom: 2rem; padding-bottom: 1.5rem;
+  }
+  .eyebrow { font-family: var(--mono); font-size: 0.7rem; color: var(--accent);
+    letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.5rem; }
+  header p { color: var(--muted); font-size: 0.85rem; }
+
+  .theme-btn {
+    float: right; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); font-size: 0.72rem; font-family: var(--mono);
+    padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer;
+    margin-top: -0.25rem;
+  }
+  .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  @media (max-width: 700px) {
+    nav { display: none; }
+    main { padding: 1.5rem 1.25rem; }
+  }
+</style>
+
+<div class="layout">
+<nav>
+  <div class="logo">// dify-ops</div>
+  <div class="nav-section">Setup</div>
+  <a href="#start">Start stack</a>
+  <a href="#scaling">Scaling overlay</a>
+  <div class="nav-section">Workers</div>
+  <a href="#workers-local">Local workers</a>
+  <a href="#workers-docker">Docker workers</a>
+  <a href="#workers-standalone">Standalone compose</a>
+  <a href="#flower">Flower UI</a>
+  <div class="nav-section">Sandbox</div>
+  <a href="#sandbox">Sandbox scale</a>
+  <div class="nav-section">Benchmark</div>
+  <a href="#bench-setup">Setup</a>
+  <a href="#bench-run">Run tests</a>
+  <a href="#bench-results">Reading results</a>
+  <div class="nav-section">Workflow</div>
+  <a href="#wf-import">Import / Export</a>
+  <a href="#wf-schedule">Schedule trigger</a>
+  <div class="nav-section">Monitor</div>
+  <a href="#monitor">Live monitoring</a>
+</nav>
+
+<main>
+<button class="theme-btn" onclick="toggleTheme()">theme</button>
+<header>
+  <div class="eyebrow">operations guide</div>
+  <h1>Dify Scaling & Test Ops</h1>
+  <p>Start, scale, benchmark, and monitor Dify workers and sandbox containers.</p>
+</header>
+
+<!-- ── Start stack ── -->
+<div class="section" id="start">
+<h2>Start minimal local stack</h2>
+
+<div class="step"><span class="step-num">01</span><div class="step-body">
+<p>Start middleware (postgres + redis + sandbox + weaviate)</p>
+<pre><code><span class="c-cmd">cd docker</span>
+<span class="c-cmd">docker compose</span> <span class="c-flag">--env-file</span> middleware.env <span class="c-flag">-f</span> docker-compose.middleware.yaml <span class="c-flag">-p</span> dify <span class="c-cmd">up -d</span> \
+  db_postgres redis sandbox ssrf_proxy weaviate plugin_daemon</code></pre>
+</div></div>
+
+<div class="step"><span class="step-num">02</span><div class="step-body">
+<p>Run DB migrations</p>
+<pre><code><span class="c-cmd">cd api && uv run flask db upgrade</span></code></pre>
+</div></div>
+
+<div class="step"><span class="step-num">03</span><div class="step-body">
+<p>Start API server (handles HTTP + WebSocket via <code>socketio_app</code>)</p>
+<pre><code><span class="c-comment"># Increased worker-connections to avoid greenthread starvation</span>
+<span class="c-cmd">SERVER_WORKER_CONNECTIONS=100 dev/start-api</span> <span class="c-flag">&gt;</span> /tmp/dify-api.log 2&gt;&1 &</code></pre>
+</div></div>
+
+<div class="step"><span class="step-num">04</span><div class="step-body">
+<p>Start Celery worker</p>
+<pre><code><span class="c-cmd">dev/start-worker</span> <span class="c-flag">-q</span> workflow,workflow_based_app_execution,pipeline,priority_pipeline \
+  <span class="c-flag">&gt;</span> /tmp/dify-worker.log 2&gt;&1 &</code></pre>
+</div></div>
+
+<div class="step"><span class="step-num">05</span><div class="step-body">
+<p>Start beat scheduler (required for schedule-trigger workflows)</p>
+<pre><code><span class="c-cmd">dev/start-beat</span> <span class="c-flag">&gt;</span> /tmp/dify-beat.log 2&gt;&1 &</code></pre>
+</div></div>
+
+<div class="step"><span class="step-num">06</span><div class="step-body">
+<p>Verify everything is healthy</p>
+<pre><code><span class="c-comment"># API</span>
+<span class="c-cmd">curl</span> http://localhost:5001/health
+
+<span class="c-comment"># Middleware containers</span>
+<span class="c-cmd">docker compose -p dify ps</span>
+
+<span class="c-comment"># Worker ping</span>
+<span class="c-cmd">cd api && uv run celery -A app.celery inspect ping</span></code></pre>
+</div></div>
+</div>
+
+<!-- ── Scaling overlay ── -->
+<div class="section" id="scaling">
+<h2>Docker Compose scaling overlay</h2>
+
+<p>The file <code>docker/docker-compose.scaling.yaml</code> is a Compose overlay that splits workers by queue group, adds a sandbox load balancer, and adds Flower. Always compose it on top of the base file.</p>
+
+<pre><code><span class="c-comment"># Start full scaled stack (2 workflow workers, 2 sandboxes)</span>
+<span class="c-cmd">cd docker</span>
+<span class="c-cmd">docker compose</span> \
+  <span class="c-flag">-f</span> docker-compose.yaml \
+  <span class="c-flag">-f</span> docker-compose.scaling.yaml \
+  <span class="c-flag">--scale</span> sandbox=2 \
+  <span class="c-cmd">up -d</span>
+
+<span class="c-comment"># Scale workflow workers to 3 at runtime (no restart)</span>
+<span class="c-cmd">docker compose</span> \
+  <span class="c-flag">-f</span> docker-compose.yaml \
+  <span class="c-flag">-f</span> docker-compose.scaling.yaml \
+  <span class="c-cmd">up -d</span> <span class="c-flag">--scale</span> worker-workflow=3 <span class="c-flag">--no-recreate</span>
+
+<span class="c-comment"># Scale sandbox to 3 at runtime</span>
+<span class="c-cmd">docker compose</span> \
+  <span class="c-flag">-f</span> docker-compose.yaml \
+  <span class="c-flag">-f</span> docker-compose.scaling.yaml \
+  <span class="c-cmd">up -d</span> <span class="c-flag">--scale</span> sandbox=3 <span class="c-flag">--no-recreate</span></code></pre>
+
+<div class="warn"><strong>Important</strong>
+When scaling sandbox, the <code>sandbox-lb</code> nginx container distributes requests via DNS round-robin to all <code>sandbox</code> replicas. Point <code>CODE_EXECUTION_ENDPOINT=http://sandbox-lb:8194</code> in your <code>.env</code>.
+</div>
+
+<h3>Worker queue groups</h3>
+<div class="tbl-wrap"><table>
+  <thead><tr><th>Service</th><th>Queues</th><th>Scale</th></tr></thead>
+  <tbody>
+    <tr><td>worker-workflow</td><td>workflow, pipeline, priority_pipeline</td><td>2–4 replicas</td></tr>
+    <tr><td>worker-dataset</td><td>dataset, dataset_summary, priority_dataset</td><td>1</td></tr>
+    <tr><td>worker (ops)</td><td>mail, ops_trace, conversation, schedule_*, triggers, retention</td><td>1</td></tr>
+  </tbody>
+</table></div>
+</div>
+
+<!-- ── Local workers ── -->
+<div class="section" id="workers-local">
+<h2>Local multi-worker setup</h2>
+
+<p>When developing locally, start multiple workers with distinct <code>--hostname</code> flags so Flower and <code>celery inspect</code> can tell them apart.</p>
+
+<pre><code>QUEUES="workflow,workflow_based_app_execution,pipeline,priority_pipeline"
+
+<span class="c-comment"># Worker 1</span>
+<span class="c-cmd">cd api && uv run celery</span> <span class="c-flag">-A</span> app.celery worker \
+  <span class="c-flag">-P</span> gevent <span class="c-flag">-c</span> 4 <span class="c-flag">-Q</span> $QUEUES \
+  <span class="c-flag">--hostname</span>=worker1@%h \
+  <span class="c-flag">--prefetch-multiplier</span>=1 \
+  <span class="c-flag">--loglevel</span>=INFO \
+  <span class="c-flag">&gt;</span> /tmp/dify-worker1.log 2&gt;&1 &
+
+<span class="c-comment"># Worker 2</span>
+<span class="c-cmd">uv run celery</span> <span class="c-flag">-A</span> app.celery worker \
+  <span class="c-flag">-P</span> gevent <span class="c-flag">-c</span> 4 <span class="c-flag">-Q</span> $QUEUES \
+  <span class="c-flag">--hostname</span>=worker2@%h \
+  <span class="c-flag">--prefetch-multiplier</span>=1 \
+  <span class="c-flag">--loglevel</span>=INFO \
+  <span class="c-flag">&gt;</span> /tmp/dify-worker2.log 2&gt;&1 &
+
+<span class="c-comment"># Worker 3</span>
+<span class="c-cmd">uv run celery</span> <span class="c-flag">-A</span> app.celery worker \
+  <span class="c-flag">-P</span> gevent <span class="c-flag">-c</span> 4 <span class="c-flag">-Q</span> $QUEUES \
+  <span class="c-flag">--hostname</span>=worker3@%h \
+  <span class="c-flag">--prefetch-multiplier</span>=1 \
+  <span class="c-flag">--loglevel</span>=INFO \
+  <span class="c-flag">&gt;</span> /tmp/dify-worker3.log 2&gt;&1 &
+
+<span class="c-comment"># Confirm all 3 are online</span>
+<span class="c-cmd">cd api && uv run celery -A app.celery inspect ping</span></code></pre>
+
+<div class="tip"><strong>Why distinct hostnames?</strong>
+Workers running on the same machine default to the same hostname (<code>celery@hostname</code>), causing conflicts in Flower and in Celery's internal worker registry. Always set <code>--hostname=workerN@%h</code>.
+</div>
+</div>
+
+<!-- ── Docker workers ── -->
+<div class="section" id="workers-docker">
+<h2>Inspect workers (Docker)</h2>
+
+<pre><code><span class="c-comment"># List all workers online</span>
+<span class="c-cmd">docker compose exec worker</span> celery <span class="c-flag">-A</span> celery_entrypoint inspect ping
+
+<span class="c-comment"># See active tasks per worker right now</span>
+<span class="c-cmd">docker compose exec worker</span> celery <span class="c-flag">-A</span> celery_entrypoint inspect active
+
+<span class="c-comment"># See which queues each worker listens to</span>
+<span class="c-cmd">docker compose exec worker</span> celery <span class="c-flag">-A</span> celery_entrypoint inspect active_queues
+
+<span class="c-comment"># Worker stats (concurrency, pool, total processed)</span>
+<span class="c-cmd">docker compose exec worker</span> celery <span class="c-flag">-A</span> celery_entrypoint inspect stats \
+  | grep <span class="c-flag">-E</span> <span class="c-str">"hostname|total|concurrency|prefetch"</span>
+
+<span class="c-comment"># From the local venv (works against any running cluster)</span>
+<span class="c-cmd">cd api && uv run celery -A app.celery inspect ping</span>
+<span class="c-cmd">cd api && uv run celery -A app.celery inspect active_queues</span></code></pre>
+</div>
+
+<!-- ── Standalone Docker workers ── -->
+<div class="section" id="workers-standalone">
+<h2>Standalone Docker workers (attach to existing middleware)</h2>
+
+<p>Use <code>docker/docker-compose.workers.yaml</code> to spin up dedicated worker containers that join the existing middleware network (<code>dify_default</code> + <code>dify_ssrf_proxy_network</code>). Middleware must already be running under project <code>dify</code>.</p>
+
+<pre><code><span class="c-comment"># Copy api/.env and override host-based addresses for containers</span>
+<span class="c-comment"># Key overrides already set in docker/worker-docker.env:</span>
+<span class="c-comment">#   REDIS_HOST=redis  REDIS_PORT=6379</span>
+<span class="c-comment">#   CELERY_BROKER_URL=redis://:difyai123456@redis:6379/1</span>
+<span class="c-comment">#   DB_HOST=db_postgres  DB_PORT=5432</span>
+<span class="c-comment">#   CODE_EXECUTION_ENDPOINT=http://ssrf_proxy:8194</span>
+<span class="c-comment">#   PLUGIN_DAEMON_URL=http://plugin_daemon:5002</span>
+<span class="c-comment">#   ENABLE_OTEL=false</span>
+
+<span class="c-comment"># Start 1 workflow worker + dataset worker + ops worker + Flower</span>
+<span class="c-cmd">docker compose</span> <span class="c-flag">-f</span> docker/docker-compose.workers.yaml <span class="c-flag">-p</span> dify-workers <span class="c-cmd">up -d</span>
+
+<span class="c-comment"># Scale workflow workers to 3 (live, no restart)</span>
+<span class="c-cmd">docker compose</span> <span class="c-flag">-f</span> docker/docker-compose.workers.yaml <span class="c-flag">-p</span> dify-workers \
+  <span class="c-cmd">up -d</span> <span class="c-flag">--scale</span> worker-workflow=3 <span class="c-flag">--no-recreate</span>
+
+<span class="c-comment"># Verify all workers registered</span>
+<span class="c-cmd">cd api && uv run celery -A app.celery inspect ping --timeout 5</span> 2>&amp;1 | grep -E "^->|nodes online"
+
+<span class="c-comment"># Tear down</span>
+<span class="c-cmd">docker compose</span> <span class="c-flag">-f</span> docker/docker-compose.workers.yaml <span class="c-flag">-p</span> dify-workers <span class="c-cmd">down</span></code></pre>
+
+<div class="tip"><strong>CODE_EXECUTION_ENDPOINT</strong>
+Docker workers must reach the sandbox through <code>ssrf_proxy:8194</code>, <em>not</em> directly to <code>sandbox:8194</code>. The ssrf_proxy acts as the reverse proxy and SSRF protection layer. Setting <code>CODE_EXECUTION_ENDPOINT=http://ssrf_proxy:8194</code> is correct for any worker running inside <code>dify_default</code> network.
+</div>
+
+<div class="warn"><strong>Flower port conflict</strong>
+The standalone compose starts Flower on port <code>5556</code> (not 5555) to avoid conflicting with a locally-running Flower. Override with <code>FLOWER_PORT=5557 docker compose …</code>.
+</div>
+</div>
+
+<!-- ── Flower ── -->
+<div class="section" id="flower">
+<h2>Flower monitoring UI</h2>
+
+<pre><code><span class="c-comment"># Docker (uses existing dify network)</span>
+<span class="c-cmd">dev/start-flower</span>
+
+<span class="c-comment"># Local (no Docker)</span>
+<span class="c-cmd">dev/start-flower-local</span>
+
+<span class="c-comment"># Stop</span>
+<span class="c-cmd">dev/stop-flower</span></code></pre>
+
+<p>Open <code>http://localhost:5555</code> — Workers tab shows each worker as a separate row with Active tasks, Processed count, and Load Average. Use port override: <code>FLOWER_PORT=5556 dev/start-flower</code></p>
+</div>
+
+<!-- ── Sandbox ── -->
+<div class="section" id="sandbox">
+<h2>Sandbox scaling</h2>
+
+<pre><code><span class="c-comment"># Check sandbox health (proxied via ssrf_proxy on :8194)</span>
+<span class="c-cmd">curl</span> http://localhost:8194/health
+
+<span class="c-comment"># Scale to 3 sandboxes (Docker Compose, via overlay)</span>
+<span class="c-cmd">docker compose</span> <span class="c-flag">-f</span> docker-compose.yaml <span class="c-flag">-f</span> docker-compose.scaling.yaml \
+  <span class="c-cmd">up -d</span> <span class="c-flag">--scale</span> sandbox=3 <span class="c-flag">--no-recreate</span>
+
+<span class="c-comment"># Confirm requests spread across replicas</span>
+<span class="c-cmd">docker compose logs sandbox-lb --follow</span></code></pre>
+
+<div class="warn"><strong>Routing architecture</strong>
+Workers never call <code>sandbox</code> directly. The correct path is:<br>
+<code>worker → ssrf_proxy:8194 (reverse proxy + SSRF protection) → sandbox:8194</code><br><br>
+For local processes: <code>CODE_EXECUTION_ENDPOINT=http://localhost:8194</code> (ssrf_proxy exposed on host).<br>
+For Docker workers on <code>dify_default</code>: <code>CODE_EXECUTION_ENDPOINT=http://ssrf_proxy:8194</code>.<br><br>
+To scale sandbox, the <code>sandbox-lb</code> nginx container must sit <em>between</em> ssrf_proxy and sandbox replicas, which requires updating ssrf_proxy's <code>SANDBOX_HOST=sandbox-lb</code> env var and recreating it.
+</div>
+</div>
+
+<!-- ── Bench setup ── -->
+<div class="section" id="bench-setup">
+<h2>Benchmark — available workflows</h2>
+<div class="tbl-wrap"><table>
+  <thead><tr><th>Key</th><th>Name</th><th>Description</th><th>Typical latency</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>fast</td>
+      <td>bench-fast-passthrough</td>
+      <td>Start → End, no compute. Tests raw queue throughput.</td>
+      <td>~300ms</td>
+    </tr>
+    <tr>
+      <td>code</td>
+      <td>bench-code-execution</td>
+      <td>One code node (reverse words). Tests sandbox single call.</td>
+      <td>~400–900ms</td>
+    </tr>
+    <tr>
+      <td>heavy</td>
+      <td>bench-heavy-wait</td>
+      <td>3 code nodes with CPU work + sleep (500+200+100ms). Tests sustained sandbox + worker load.</td>
+      <td>3–6s</td>
+    </tr>
+  </tbody>
+</table></div>
+
+<p>API keys are hardcoded in <code>bench-run.py</code>. Re-run <code>python3 dify-workflow.py list</code> to find app IDs if you recreate them.</p>
+</div>
+
+<!-- ── Bench run ── -->
+<div class="section" id="bench-run">
+<h2>Benchmark — run commands</h2>
+
+<h3>Local (requires Python 3.12+)</h3>
+<pre><code><span class="c-comment"># Fast passthrough — 10 runs, 5 concurrent</span>
+<span class="c-cmd">python3 bench-run.py</span> <span class="c-flag">--workflow</span> fast <span class="c-flag">-n</span> 10 <span class="c-flag">-c</span> 5
+
+<span class="c-comment"># Code execution — 20 runs, 10 concurrent</span>
+<span class="c-cmd">python3 bench-run.py</span> <span class="c-flag">--workflow</span> code <span class="c-flag">-n</span> 20 <span class="c-flag">-c</span> 10
+
+<span class="c-comment"># Heavy (3-step wait) — stress test</span>
+<span class="c-cmd">python3 bench-run.py</span> <span class="c-flag">--workflow</span> heavy <span class="c-flag">-n</span> 20 <span class="c-flag">-c</span> 8
+
+<span class="c-comment"># Run all suites back to back</span>
+<span class="c-cmd">python3 bench-run.py</span> <span class="c-flag">--workflow</span> all <span class="c-flag">-n</span> 15 <span class="c-flag">-c</span> 6
+
+<span class="c-comment"># Push to 30 concurrent to see queue build up</span>
+<span class="c-cmd">python3 bench-run.py</span> <span class="c-flag">--workflow</span> heavy <span class="c-flag">-n</span> 50 <span class="c-flag">-c</span> 30</code></pre>
+
+<h3>Via Docker — dev/bench (no Python required)</h3>
+<pre><code><span class="c-comment"># Same flags, runs python:3.12-slim in Docker with --network host</span>
+<span class="c-cmd">dev/bench</span> <span class="c-flag">--workflow</span> heavy <span class="c-flag">-n</span> 20 <span class="c-flag">-c</span> 8
+<span class="c-cmd">dev/bench</span> <span class="c-flag">--workflow</span> all  <span class="c-flag">-n</span> 15 <span class="c-flag">-c</span> 6
+
+<span class="c-comment"># Target a different API (e.g. staging)</span>
+<span class="c-cmd">DIFY_BASE_URL=http://staging:5001 dev/bench</span> <span class="c-flag">--workflow</span> heavy <span class="c-flag">-n</span> 10 <span class="c-flag">-c</span> 4
+
+<span class="c-comment"># Override Redis connection (bench-run.py env vars)</span>
+<span class="c-comment">#   DIFY_BASE_URL   API base URL            (default: http://localhost:5001)</span>
+<span class="c-comment">#   REDIS_HOST      Redis hostname           (default: localhost)</span>
+<span class="c-comment">#   REDIS_PORT      Redis port               (default: 6380)</span>
+<span class="c-comment">#   REDIS_PASSWORD  Redis auth password      (default: difyai123456)</span></code></pre>
+
+<div class="tip"><strong>How dev/bench works</strong>
+Uses <code>--network host</code> on Linux/WSL2 so the container shares localhost — no port mapping needed. On macOS it switches to bridge mode and sets <code>host.docker.internal</code> automatically. Redis queue depth is checked via raw TCP RESP (no Docker socket required).
+</div>
+</div>
+
+<!-- ── Bench results ── -->
+<div class="section" id="bench-results">
+<h2>Reading benchmark results</h2>
+<div class="tbl-wrap"><table>
+  <thead><tr><th>Metric</th><th>Healthy</th><th>Action needed</th></tr></thead>
+  <tbody>
+    <tr><td>Success rate</td><td>100%</td><td>Any failure → check worker logs</td></tr>
+    <tr><td>Queue peak (workflow)</td><td>0 or &lt;10</td><td>&gt;50 → add worker replica</td></tr>
+    <tr><td>P95 latency</td><td>Stable across batches</td><td>Spikes in later batches → sandbox bottleneck</td></tr>
+    <tr><td>Throughput runs/s</td><td>Scales with worker count</td><td>Flat despite more workers → Redis or API is bottleneck</td></tr>
+  </tbody>
+</table></div>
+
+<div class="info"><strong>Observed results — scale-out comparison (heavy workflow, n=20, c=8)</strong>
+<strong style="display:block;margin-top:0.5rem;font-family:var(--mono);font-size:0.75rem;color:var(--text)">2 workers (baseline):</strong> P50 3,639ms · P95 36,536ms · 0.49 runs/s · wall 40.9s
+<strong style="display:block;margin-top:0.3rem;font-family:var(--mono);font-size:0.75rem;color:var(--text)">4 workers (3 Docker + 1 local):</strong> P50 2,782ms · P95 3,488ms · 2.65 runs/s · wall 7.6s — <strong>P95 −90%, throughput +441%</strong>
+</div>
+</div>
+
+<!-- ── Workflow ── -->
+<div class="section" id="wf-import">
+<h2>Import / Export workflows</h2>
+
+<pre><code><span class="c-comment"># List all apps</span>
+<span class="c-cmd">python3 dify-workflow.py list</span>
+<span class="c-cmd">python3 dify-workflow.py list</span> <span class="c-flag">--mode</span> workflow
+
+<span class="c-comment"># Export single app to file</span>
+<span class="c-cmd">python3 dify-workflow.py export</span> &lt;app-id&gt; <span class="c-flag">-o</span> backup.yml
+
+<span class="c-comment"># Export all apps to folder</span>
+<span class="c-cmd">python3 dify-workflow.py export</span> <span class="c-flag">--all</span> <span class="c-flag">-o</span> ./backups/
+
+<span class="c-comment"># Import (creates new app)</span>
+<span class="c-cmd">python3 dify-workflow.py import</span> my-workflow.yml
+
+<span class="c-comment"># Import and publish immediately</span>
+<span class="c-cmd">python3 dify-workflow.py import</span> my-workflow.yml <span class="c-flag">--publish</span></code></pre>
+
+<p>Override credentials via env: <code>DIFY_EMAIL=x DIFY_PASSWORD=y DIFY_BASE_URL=http://prod:5001 python3 dify-workflow.py list</code></p>
+</div>
+
+<div class="section" id="wf-schedule">
+<h2>Schedule trigger (run every N minutes)</h2>
+
+<pre><code><span class="c-comment"># Beat is required — without it, scheduled triggers never fire</span>
+<span class="c-cmd">dev/start-beat</span> <span class="c-flag">&gt;</span> /tmp/dify-beat.log 2&gt;&1 &
+
+<span class="c-comment"># Verify beat is polling</span>
+<span class="c-cmd">tail -f</span> /tmp/dify-beat.log
+<span class="c-comment"># → "Scheduler: Sending due task workflow_schedule_poller"</span></code></pre>
+
+<p>In the workflow editor: replace the Start node with a <strong>Schedule Trigger</strong> node → choose <em>Cron</em> mode → enter <code>* * * * *</code> for every minute. Publish, then beat dispatches it automatically.</p>
+
+<div class="warn"><strong>Run exactly one beat process</strong>
+Running two <code>beat</code> processes causes duplicate task dispatch. Beat is not horizontally scalable — only one instance per cluster.
+</div>
+</div>
+
+<!-- ── Monitor ── -->
+<div class="section" id="monitor">
+<h2>Live monitoring commands</h2>
+
+<pre><code><span class="c-comment"># Watch workflow queue depth every second</span>
+<span class="c-cmd">watch -n 1</span> <span class="c-str">'docker compose -p dify exec redis redis-cli -a difyai123456 llen workflow'</span>
+
+<span class="c-comment"># Watch all queues at once</span>
+<span class="c-cmd">watch -n 1</span> <span class="c-str">'docker compose -p dify exec redis redis-cli -a difyai123456 \
+  llen workflow && \
+  redis-cli -a difyai123456 llen dataset && \
+  redis-cli -a difyai123456 llen celery'</span>
+
+<span class="c-comment"># Show active tasks across all workers</span>
+<span class="c-cmd">cd api && uv run celery -A app.celery inspect active</span>
+
+<span class="c-comment"># Count workers online</span>
+<span class="c-cmd">cd api && uv run celery -A app.celery inspect ping</span> 2&gt;/dev/null | <span class="c-cmd">grep -c</span> <span class="c-str">"OK"</span>
+
+<span class="c-comment"># Flower UI (real-time dashboard)</span>
+<span class="c-cmd">dev/start-flower-local</span>   <span class="c-comment"># → http://localhost:5555</span>
+<span class="c-cmd">dev/start-flower</span>          <span class="c-comment"># Docker variant</span></code></pre>
+</div>
+
+</main>
+</div>
+
+<script>
+  function toggleTheme() {
+    const r = document.documentElement;
+    const cur = r.getAttribute('data-theme');
+    const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (!cur) r.setAttribute('data-theme', sys === 'dark' ? 'light' : 'dark');
+    else if (cur === 'dark') r.setAttribute('data-theme', 'light');
+    else r.removeAttribute('data-theme');
+  }
+
+  // highlight active nav link on scroll
+  const sections = document.querySelectorAll('[id]');
+  const links = document.querySelectorAll('nav a');
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => obs.observe(s));
+</script>
