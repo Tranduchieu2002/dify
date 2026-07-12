@@ -7,5 +7,11 @@ cd "$SCRIPT_DIR/../api"
 
 uv run flask db upgrade
 
-uv run \
-  flask run --host 0.0.0.0 --port=5001 --debug
+uv run gunicorn \
+  --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker \
+  --workers "${SERVER_WORKER_AMOUNT:-1}" \
+  --worker-connections "${SERVER_WORKER_CONNECTIONS:-10}" \
+  --timeout "${GUNICORN_TIMEOUT:-200}" \
+  --bind "0.0.0.0:${DIFY_PORT:-5001}" \
+  --reload \
+  app:socketio_app
