@@ -1,0 +1,51 @@
+services:
+  # Patch primary: add WAL replication flags.
+  # Overrides the command in docker-compose.yaml — must keep all original flags.
+  # Requires one restart of db_postgres to activate wal_level=replica.
+  db_postgres:
+    command: >
+      postgres
+      -c 'max_connections=${POSTGRES_MAX_CONNECTIONS:-100}'
+      -c 'shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB}'
+      -c 'work_mem=${POSTGRES_WORK_MEM:-4MB}'
+      -c 'maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-64MB}'
+      -c 'effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4096MB}'
+      -c 'statement_timeout=${POSTGRES_STATEMENT_TIMEOUT:-0}'
+      -c 'idle_in_transaction_session_timeout=${POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT:-0}'
+      -c 'wal_level=replica'
+      -c 'max_wal_senders=3'
+      -c 'wal_keep_size=256'
+
+  db_postgres_replica:
+    image: postgres:15-alpine
+    profiles:
+      - postgresql
+    container_name: dify-db-replica
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-difyai123456}
+      POSTGRES_DB: ${DB_DATABASE:-dify}
+      PRIMARY_HOST: db_postgres
+      PRIMARY_PORT: 5432
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replicator_pass}
+    volumes:
+      - ./postgres/replica-entrypoint.sh:/replica-entrypoint.sh:ro
+      - db_replica_data:/var/lib/postgresql/data
+    entrypoint: ["/bin/bash", "/replica-entrypoint.sh"]
+    networks:
+      - default
+    depends_on:
+      db_postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-U", "${DB_USERNAME:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  db_replica_data:
+    name: dify_db_replica_data

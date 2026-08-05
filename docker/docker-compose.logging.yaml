@@ -79,6 +79,12 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics traceToLogs"
+      # Dify DB — used by workflow-monitor datasource provisioning
+      DIFY_DB_HOST: "${DB_HOST:-db_postgres_replica}"
+      DIFY_DB_PORT: "${DB_PORT:-5432}"
+      DIFY_DB_USER: "${DB_USERNAME:-postgres}"
+      DIFY_DB_PASSWORD: "${DB_PASSWORD:-difyai123456}"
+      DIFY_DB_NAME: "${DB_DATABASE:-dify}"
     volumes:
       - ./logging/grafana/provisioning:/etc/grafana/provisioning
       - ./logging/grafana/dashboards:/etc/grafana/dashboards

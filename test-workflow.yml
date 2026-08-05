@@ -1,0 +1,190 @@
+app:
+  description: 'A test workflow that takes a user query, summarizes it via LLM, and returns the result.'
+  icon: 🧪
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: test-summarizer
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+        - .JPG
+        - .JPEG
+        - .PNG
+        - .GIF
+        - .WEBP
+        - .SVG
+      allowed_file_types:
+        - image
+      allowed_file_upload_methods:
+        - local_file
+        - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+          - local_file
+          - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: start
+          targetType: llm
+        id: start-to-llm
+        source: start_node
+        sourceHandle: source
+        target: llm_node
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: end
+        id: llm-to-end
+        source: llm_node
+        sourceHandle: source
+        target: end_node
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    nodes:
+      - data:
+          desc: ''
+          selected: false
+          title: Start
+          type: start
+          variables:
+            - label: text
+              max_length: 2000
+              options: []
+              required: true
+              type: text-input
+              variable: text
+        height: 90
+        id: start_node
+        position:
+          x: 30
+          y: 227
+        positionAbsolute:
+          x: 30
+          y: 227
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: Summarize the input text using an LLM.
+          title: Summarize
+          type: llm
+          model:
+            provider: openai
+            name: gpt-4o-mini
+            mode: chat
+            completion_params:
+              temperature: 0.3
+              max_tokens: 512
+          prompt_template:
+            - role: system
+              text: >
+                You are a concise summarizer. Given the user's text,
+                return a clear, brief summary in 2-3 sentences.
+                Do not add commentary — only return the summary.
+            - role: user
+              text: '{{#start_node.text#}}'
+          vision:
+            enabled: false
+            configs:
+              variable_selector: []
+          memory:
+            enabled: false
+            window:
+              enabled: false
+              size: 50
+          context:
+            enabled: false
+            variable_selector: []
+          structured_output:
+            enabled: false
+          retry_config:
+            enabled: true
+            max_retries: 3
+            retry_interval: 1000
+            exponential_backoff:
+              enabled: true
+              multiplier: 2
+              max_interval: 10000
+        height: 98
+        id: llm_node
+        position:
+          x: 334
+          y: 227
+        positionAbsolute:
+          x: 334
+          y: 227
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ''
+          outputs:
+            - value_selector:
+                - llm_node
+                - text
+              value_type: string
+              variable: summary
+          selected: false
+          title: End
+          type: end
+        height: 90
+        id: end_node
+        position:
+          x: 638
+          y: 227
+        positionAbsolute:
+          x: 638
+          y: 227
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.8
