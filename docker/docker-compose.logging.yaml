@@ -9,6 +9,9 @@ services:
       - ./logging/loki-config.yml:/etc/loki/local-config.yaml
       - loki_data:/loki
     command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - docker_default
+      - dify_default
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
       interval: 5s
@@ -25,6 +28,9 @@ services:
       - ./logging/tempo-config.yml:/etc/tempo/config.yml
       - tempo_data:/var/tempo
     command: -config.file=/etc/tempo/config.yml
+    networks:
+      - docker_default
+      - dify_default
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3200/ready || exit 1"]
       interval: 5s
@@ -40,6 +46,9 @@ services:
     volumes:
       - ./logging/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
+    networks:
+      - docker_default
+      - dify_default
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --web.enable-remote-write-receiver
@@ -57,6 +66,9 @@ services:
       - ./logging/alloy-config.alloy:/etc/alloy/config.alloy
       - ${DIFY_LOG_DIR:-./volumes/logs}:/logs:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker_default
+      - dify_default
     command:
       - run
       - /etc/alloy/config.alloy
@@ -80,7 +92,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics traceToLogs"
       # Dify DB — used by workflow-monitor datasource provisioning
-      DIFY_DB_HOST: "${DB_HOST:-db_postgres_replica}"
+      DIFY_DB_HOST: "${DB_HOST:-db_postgres}"
       DIFY_DB_PORT: "${DB_PORT:-5432}"
       DIFY_DB_USER: "${DB_USERNAME:-postgres}"
       DIFY_DB_PASSWORD: "${DB_PASSWORD:-difyai123456}"
@@ -89,14 +101,66 @@ services:
       - ./logging/grafana/provisioning:/etc/grafana/provisioning
       - ./logging/grafana/dashboards:/etc/grafana/dashboards
       - grafana_data:/var/lib/grafana
+    networks:
+      - docker_default
+      - dify_default
     depends_on:
       loki:
         condition: service_healthy
       tempo:
         condition: service_healthy
+  dify-exporter:
+    build:
+      context: ./exporters/dify-monitoring
+    # hoặc dùng image đã build sẵn:
+    # image: dify-exporter:1.0.0
+    container_name: dify-exporter
+    restart: always
+    env_file:
+      - ./middleware.env
+    environment:
+      # Ghi đè nếu không dùng env_file. Host comes from `DB_HOST` (default: db_postgres).
+      # Use the same DB credentials as the middleware environment by default.
+      DIFY_DB_DSN: ${DIFY_EXPORTER_DSN:-postgresql://${DB_USERNAME:-postgres}:${DB_PASSWORD:-difyai123456}@${DB_HOST:-db_postgres}:${DB_PORT:-5432}/${DB_DATABASE:-dify}}
+      STATE_PATH: /var/lib/dify-exporter/state.json
+      APP_MODES: workflow
+      BACKFILL_DAYS: "365"
+      POLL_INTERVAL_SECONDS: "30"
+    volumes:
+      - dify_exporter_state:/var/lib/dify-exporter
+    ports:
+      # Chỉ mở ra localhost — Prometheus scrape qua network nội bộ.
+      # Bỏ dòng này nếu Prometheus cùng docker network.
+      - "9192:9192"
+    # depends_on intentionally omitted so this file can run standalone; exporter will retry DB until available
+    networks:
+      - docker_default
+      - dify_default
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9192/metrics || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   loki_data:
   tempo_data:
   prometheus_data:
   grafana_data:
+  dify_exporter_state:
+
+networks:
+  dify_default:
+    external: true
+  docker_default:
+    external: true

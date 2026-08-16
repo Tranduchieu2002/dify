@@ -3,7 +3,7 @@
 # Usage: bash postgres/setup-primary-replication.sh
 set -e
 
-COMPOSE_FILES="-f docker-compose.yaml -f docker-compose.replica.yaml"
+COMPOSE_FILES="-p dify -f docker-compose.middleware.yaml -f docker-compose.replica.yaml"
 REPLICATION_PASSWORD="${REPLICATION_PASSWORD:-replicator_pass}"
 
 log() { echo "==> $*"; }
